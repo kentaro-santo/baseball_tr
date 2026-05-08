@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta id="viewport-meta" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Baseball | Training Tracker</title>
+    <!-- Google Fonts: Modern & Clean typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css?v=4">
+    <!-- Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-db.js?v=4"></script>
+</head>
+<body>
+    <!-- Mobile Sidebar Overlay -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-baseball-bat-ball"></i>
+                <span>Baseball</span>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-tab="dashboard">
+                    <i class="fa-solid fa-chart-line"></i> <span class="nav-text-pc">ダッシュボード</span><span class="nav-text-mobile">ホーム</span>
+                </li>
+                <li data-tab="weight">
+                    <i class="fa-solid fa-weight-scale"></i> <span class="nav-text-pc">体重・体組成</span><span class="nav-text-mobile">体重</span>
+                </li>
+                <li data-tab="training">
+                    <i class="fa-solid fa-dumbbell"></i> <span class="nav-text-pc">ウエイトトレーニング</span><span class="nav-text-mobile">筋トレ</span>
+                </li>
+                <li data-tab="baseball-stats">
+                    <i class="fa-solid fa-baseball"></i> <span class="nav-text-pc">野球指標</span><span class="nav-text-mobile">野球</span>
+                </li>
+                <li data-tab="history">
+                    <i class="fa-solid fa-clock-rotate-left"></i> <span class="nav-text-pc">記録履歴</span><span class="nav-text-mobile">履歴</span>
+                </li>
+                <li data-tab="ranking">
+                    <i class="fa-solid fa-trophy"></i> <span class="nav-text-pc">ランキング</span><span class="nav-text-mobile">順位</span>
+                </li>
+                <li data-tab="players"><i class="fa-solid fa-users"></i> <span class="nav-text-pc">選手管理</span><span class="nav-text-mobile">選手</span></li>
+            </ul>
+            <div class="user-profile">
+                <img src="https://api.dicebear.com/6.x/avataaars/svg?seed=Guest&backgroundColor=3b82f6" alt="User Avatar" id="profile-avatar">
+                <div class="user-info">
+                    <h4 id="profile-name">ゲスト</h4>
+                    <p id="profile-detail">未ログイン</p>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- Header -->
+            <header class="top-header">
+                <div style="display: flex; align-items: center; gap: 12px; flex: 1; overflow: hidden;">
+                    <button id="mobile-menu-btn" class="mobile-menu-btn"><i class="fa-solid fa-bars"></i></button>
+                    <h1 id="page-title">ダッシュボード</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-outline" id="view-toggle-btn" style="padding: 8px 16px; border-radius: 20px; font-size: 0.85rem;" title="PC/スマホ表示切替">
+                        <i class="fa-solid fa-desktop"></i> <span id="view-toggle-text">PC版で表示</span>
+                    </button>
+                    <!-- Notification Icon -->
+                    <div id="notification-btn" class="notification-icon" style="position: relative; display: none; cursor: pointer;">
+                        <i class="fa-solid fa-bell" style="font-size: 1.3rem; color: var(--text-secondary);"></i>
+                        <span id="unread-badge" class="badge" style="display: none; top: -5px; right: -5px; width: 18px; height: 18px; font-size: 0.7rem;">0</span>
+                    </div>
+                    <!-- Auth Buttons -->
+                    <button class="btn-outline" id="header-login-btn" style="padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; display: none;">
+                        <i class="fa-solid fa-arrow-right-to-bracket"></i> ログイン
+                    </button>
+                    <button class="btn-outline" id="header-logout-btn" style="padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; display: none; margin-right: 8px;">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i> ログアウト
+                    </button>
+
+                    <button class="btn-outline" id="export-csv-btn" style="display:none; padding: 8px 16px; border-radius: 20px; font-size: 0.85rem;" title="全データをCSVで出力">
+                        <i class="fa-solid fa-download"></i> <span class="hide-mobile">CSV出力</span>
+                    </button>
+                    <button class="btn-primary" id="add-record-btn">
+                        <i class="fa-solid fa-plus"></i> <span class="hide-mobile">新規記録</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="scrollable-content">
+                <!-- Dashboard Tab -->
+                <div id="dashboard" class="tab-pane active fade-in">
+                    
+                    <!-- Feedback Comments Section (Player only) -->
+                    <div id="dashboard-comments" style="display: none; margin-bottom: 24px;"></div>
+                    <div id="comments-history-area" style="display: none; margin-bottom: 24px;">
+                        <button class="btn-outline" id="toggle-comments-history" style="font-size: 0.8rem; margin-bottom: 12px;">
+                            <i class="fa-solid fa-clock-rotate-left"></i> メッセージ履歴を表示
+                        </button>
+                        <div id="dashboard-comments-history" style="display: none;"></div>
+                    </div>
+
+                    <!-- Master Dashboard Filters (Hidden by default) -->
+                    <div id="master-dash-filters" class="glass" style="display: none; padding: 20px; margin-bottom: 24px; border-radius: var(--border-radius);">
+                        <h3 style="margin-bottom: 16px; font-size: 1rem; color: var(--accent-orange);"><i class="fa-solid fa-filter"></i> マスター・表示フィルター</h3>
+                        <div class="filter-controls" style="display: flex; gap: 16px; flex-wrap: wrap;">
+                            <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">対象学年</label>
+                                <select id="dash-filter-grade" class="glass-select" style="width: 100%;">
+                                    <option value="all">全学年</option>
+                                    <option value="大1">大1</option>
+                                    <option value="大2">大2</option>
+                                    <option value="大3">大3</option>
+                                    <option value="大4">大4</option>
+                                    <option value="院1">院1</option>
+                                    <option value="院2">院2</option>
+                                    <option value="スタッフ/その他">スタッフ/その他</option>
+                                </select>
+                            </div>
+                            <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">個別選手</label>
+                                <select id="dash-filter-player" class="glass-select" style="width: 100%;">
+                                    <option value="all">全選手 (平均値表示)</option>
+                                </select>
+                                <input type="text" id="dash-filter-player-search" placeholder="名前で検索..." style="width: 100%; margin-top: 4px; padding: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: rgba(255,255,255,0.08); color: var(--text-primary);" />
+                            </div>
+                            <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">ポジション</label>
+                                <select id="dash-filter-position" class="glass-select" style="width: 100%;">
+                                    <option value="all">全ポジション</option>
+                                    <option value="投手">投手</option>
+                                    <option value="捕手">捕手</option>
+                                    <option value="内野手">内野手</option>
+                                    <option value="外野手">外野手</option>
+                                    <option value="スタッフ/その他">スタッフ/その他</option>
+                                </select>
+                            </div>
+                            <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">集計期間</label>
+                                <select id="dash-filter-period" class="glass-select" style="width: 100%;">
+                                    <option value="daily">日次 (Daily)</option>
+                                    <option value="weekly">週次 (Weekly)</option>
+                                    <option value="monthly">月次 (Monthly)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Exclusion Filters -->
+                        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--border-glass);">
+                            <h4 style="font-size: 0.85rem; color: var(--accent-red); margin-bottom: 12px;"><i class="fa-solid fa-user-slash"></i> 除外フィルター (特定の条件を除外)</h4>
+                            <div class="filter-controls" style="display: flex; gap: 16px; flex-wrap: wrap;">
+                                <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                    <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">除外する学年</label>
+                                    <select id="dash-exclude-grade" class="glass-select" style="width: 100%; border-color: rgba(239, 68, 68, 0.2);">
+                                        <option value="none">なし</option>
+                                        <option value="大1">大1</option>
+                                        <option value="大2">大2</option>
+                                        <option value="大3">大3</option>
+                                        <option value="大4">大4</option>
+                                        <option value="院1">院1</option>
+                                        <option value="院2">院2</option>
+                                        <option value="スタッフ/その他">スタッフ/その他</option>
+                                    </select>
+                                </div>
+                                <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                    <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">除外するポジション</label>
+                                    <select id="dash-exclude-position" class="glass-select" style="width: 100%; border-color: rgba(239, 68, 68, 0.2);">
+                                        <option value="none">なし</option>
+                                        <option value="投手">投手</option>
+                                        <option value="捕手">捕手</option>
+                                        <option value="内野手">内野手</option>
+                                        <option value="外野手">外野手</option>
+                                        <option value="スタッフ/その他">スタッフ/その他</option>
+                                    </select>
+                                </div>
+                                <div class="filter-item" style="flex: 1; min-width: 150px;">
+                                    <label style="display: block; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">除外する個人</label>
+                                    <select id="dash-exclude-player" class="glass-select" style="width: 100%; border-color: rgba(239, 68, 68, 0.2);">
+                                        <option value="none">なし</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card glass hover-lift">
+                            <div class="stat-header">
+                                <span>現在の体重</span>
+                                <div class="icon-circle weight"><i class="fa-solid fa-weight-scale"></i></div>
+                            </div>
+                            <h2><span id="dash-weight">--</span> <small>kg</small></h2>
+                            <span class="trend neutral" id="dash-weight-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                        </div>
+                        <div class="stat-card glass hover-lift">
+                            <div class="stat-header">
+                                <span>球速 (MAX)</span>
+                                <div class="icon-circle speed"><i class="fa-solid fa-fire"></i></div>
+                            </div>
+                            <h2><span id="dash-speed">--</span> <small>km/h</small></h2>
+                            <span class="trend neutral" id="dash-speed-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                        </div>
+                        <div class="stat-card glass hover-lift">
+                            <div class="stat-header">
+                                <span>スクワット (MAX)</span>
+                                <div class="icon-circle strength"><i class="fa-solid fa-dumbbell"></i></div>
+                            </div>
+                            <h2><span id="dash-squat">--</span> <small>kg</small></h2>
+                            <span class="trend neutral" id="dash-squat-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                        </div>
+                        <div class="stat-card glass hover-lift">
+                            <div class="stat-header">
+                                <span>単位仕事量 (重量/体重)</span>
+                                <div class="icon-circle ratio"><i class="fa-solid fa-divide"></i></div>
+                            </div>
+                            <h2><span id="dash-ratio">--</span></h2>
+                            <span class="trend neutral" id="dash-ratio-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                        </div>
+                        <div class="stat-card glass hover-lift">
+                            <div class="stat-header">
+                                <span>遠投</span>
+                                <div class="icon-circle throw"><i class="fa-solid fa-baseball-bat-ball"></i></div>
+                            </div>
+                            <h2><span id="dash-throw">--</span> <small>m</small></h2>
+                            <span class="trend neutral" id="dash-throw-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                        </div>
+                    </div>
+
+                    <div class="mobile-graph-tabs">
+                        <button class="graph-tab active" data-graph="weight">体重推移</button>
+                        <button class="graph-tab" data-graph="speed">球速推移</button>
+                        <button class="graph-tab" data-graph="training">筋トレ推移</button>
+                        <button class="graph-tab" data-graph="stats">野球指標</button>
+                        <button class="graph-tab" data-graph="ratio">単位仕事量推移</button>
+                    </div>
+
+                    <div class="charts-container">
+                        <div class="chart-card glass" id="graph-card-weight">
+                            <div class="chart-header">
+                                <h3>体重・体脂肪率の推移</h3>
+                                <select class="chart-filter" id="weight-chart-range"><option value="3">過去3ヶ月</option><option value="6">過去6ヶ月</option><option value="12">過去1年</option></select>
+                            </div>
+                            <div class="canvas-wrapper">
+                                <canvas id="weightChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card glass" id="graph-card-speed">
+                            <div class="chart-header">
+                                <h3>球速推移</h3>
+                                <select class="chart-filter" id="speed-chart-range"><option value="6">過去6ヶ月</option><option value="12">過去1年</option></select>
+                            </div>
+                            <div class="canvas-wrapper">
+                                <canvas id="pitchSpeedChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card glass" id="graph-card-training">
+                            <div class="chart-header">
+                                <h3>ウエイトトレーニング推移</h3>
+                                <select class="chart-filter" id="training-chart-type">
+                                    <option value="スクワット">スクワット</option>
+                                    <option value="ベンチプレス">ベンチプレス</option>
+                                    <option value="デッドリフト">デッドリフト</option>
+                                    <option value="クリーン">クリーン</option>
+                                    <option value="懸垂">懸垂</option>
+                                </select>
+                            </div>
+                            <div class="canvas-wrapper">
+                                <canvas id="trainingChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card glass" id="graph-card-ratio">
+                            <div class="chart-header">
+                                <h3>単位仕事量推移 (重量/体重)</h3>
+                                <div style="font-size: 0.8rem; color: var(--text-secondary);">※ウエイト種目と連動</div>
+                            </div>
+                            <div class="canvas-wrapper">
+                                <canvas id="ratioChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card glass" id="graph-card-stats">
+                            <div class="chart-header">
+                                <h3>野球指標推移</h3>
+                                <select class="chart-filter" id="stats-chart-type">
+                                    <option value="遠投 (m)">遠投</option>
+                                    <option value="立ち幅跳び (cm)">立ち幅跳び</option>
+                                    <option value="30m走 (秒)">30m走</option>
+                                    <option value="握力-右 (kg)">握力-右</option>
+                                    <option value="握力-左 (kg)">握力-左</option>
+                                </select>
+                            </div>
+                            <div class="canvas-wrapper">
+                                <canvas id="statsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weight Tab -->
+                <div id="weight" class="tab-pane fade-in">
+                    <div class="glass form-container">
+                        <h2>体重・体組成の入力</h2>
+                        <form class="dynamic-form" id="weight-form">
+                            <div class="form-group row">
+                                <div class="col">
+                                    <label>測定日</label>
+                                    <input type="date" id="weight-date" required>
+                                </div>
+                                <div class="col">
+                                    <label>測定時間</label>
+                                    <input type="time" id="weight-time" value="08:00">
+                                </div>
+                            </div>
+                            <div class="form-group row">
+                                <div class="col">
+                                    <label>体重 (kg)</label>
+                                    <input type="number" id="weight-val" step="0.1" placeholder="例: 75.5" required>
+                                </div>
+                                <div class="col">
+                                    <label>体脂肪率 (%)</label>
+                                    <input type="number" id="bodyfat-val" step="0.1" placeholder="例: 12.5">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>コンディションメモ</label>
+                                <textarea id="weight-memo" placeholder="今日の体調や疲労感などを記録..."></textarea>
+                            </div>
+                            <button type="submit" class="btn-primary w-100">記録を保存する</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Chat Tab -->
+                <div id="chat" class="tab-pane fade-in" style="display:none;">
+                    <div class="glass" style="height: calc(100vh - 160px); display: flex; flex-direction: column; padding: 0 !important; overflow: hidden;">
+                        <div class="chat-header" style="border-bottom: 1px solid var(--border-glass); background: rgba(255,255,255,0.02);">
+                            <h2 id="pane-chat-title" style="margin: 0; font-size: 1.2rem;"><i class="fa-solid fa-comments"></i> チャット</h2>
+                            <div id="master-chat-selector" class="master-only" style="display: none;">
+                                <select id="chat-player-select" style="background: rgba(0,0,0,0.3); color: white; border: 1px solid var(--border-glass); padding: 5px 10px; border-radius: 4px;">
+                                    <option value="">選手を選択...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="pane-chat-messages" class="chat-messages-container" style="flex: 1; padding: 20px;">
+                            <div style="text-align: center; margin-top: 50px; opacity: 0.5;">チャットを選択してください</div>
+                        </div>
+                        <form id="pane-chat-form" class="chat-input-area" style="padding: 15px; background: rgba(255,255,255,0.02);">
+                            <input type="text" id="pane-chat-input" placeholder="メッセージを入力..." required autocomplete="off">
+                            <button type="submit" class="btn-send"><i class="fa-solid fa-paper-plane"></i></button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Training Tab -->
+                <div id="training" class="tab-pane fade-in">
+                    <div class="glass form-container">
+                        <h2>ウエイトトレーニング記録</h2>
+                        <form class="dynamic-form" id="training-form">
+                            <div class="form-group row">
+                                <div class="col">
+                                    <select id="train-type" required>
+                                        <option value="">種目を選択...</option>
+                                        <option>スクワット</option>
+                                        <option>ベンチプレス</option>
+                                        <option>ボックスジャンプ</option>
+                                        <option>10m走</option>
+                                        <option>メディシンボールスロー(前)</option>
+                                        <option>メディシンボールスロー(後ろ)</option>
+                                        <option>メディシンボールスロー(プッシュ)</option>
+                                        <option>メディシンボールスロー(サイド)</option>
+                                        <option>立幅</option>
+                                        <option>立ち三段</option>
+                                        <option>クリーン</option>
+                                        <option>ペンタゴンクリーン</option>
+                                        <option>フロントスクワット</option>
+                                        <option>デッドリフト</option>
+                                    </select>
+                                </div>
+                                <div class="col">
+                                    <label>実施日</label>
+                                    <input type="date" id="train-date" required>
+                                </div>
+                            </div>
+                            <div class="form-group row">
+                                <div class="col">
+                                    <label>重量 (kg)</label>
+                                    <input type="number" id="train-weight" step="0.5" placeholder="例: 80" required>
+                                </div>
+                                <div class="col">
+                                    <label>回数 (Rep)</label>
+                                    <input type="number" id="train-reps" placeholder="例: 10" required>
+                                </div>
+                                <div class="col">
+                                    <label>セット数</label>
+                                    <input type="number" id="train-sets" value="3" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn-primary w-100">記録を保存する</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Baseball Stats Tab -->
+                <div id="baseball-stats" class="tab-pane fade-in">
+                    <div class="glass form-container">
+                        <h2>野球特化型 指標入力</h2>
+                        <p class="subtitle">ピッチング、バッティング、走塁等のデータを記録します</p>
+                        <form class="dynamic-form" id="stats-form">
+                            <div class="form-group row">
+                                <div class="col">
+                                    <label>測定項目</label>
+                                    <select id="stat-type" required>
+                                        <option value="">項目を選択...</option>
+                                        <option>球速 (km/h)</option>
+                                        <option>スイングスピード (km/h)</option>
+                                        <option>50m走 (秒)</option>
+                                        <option>遠投 (m)</option>
+                                        <option>回転数 (rpm)</option>
+                                    </select>
+                                </div>
+                                <div class="col">
+                                    <label>実施日</label>
+                                    <input type="date" id="stat-date" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>記録数値</label>
+                                <input type="number" id="stat-val" step="0.01" placeholder="数値を入力" required>
+                            </div>
+                            <button type="submit" class="btn-primary w-100">記録を保存する</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Goals Tab (Hidden for now) -->
+                <div id="goals" class="tab-pane fade-in" style="display:none;">
+                </div>
+
+                <!-- History Tab -->
+                <div id="history" class="tab-pane fade-in">
+                    <div class="glass form-container" style="max-width: 800px;">
+                        <h2>入力履歴の確認と編集</h2>
+                        <div class="ranking-filters" style="margin-bottom: 24px;">
+                            <button class="filter-chip active" id="hist-filter-weight">体重・体組成</button>
+                            <button class="filter-chip" id="hist-filter-training">ウエイトトレーニング</button>
+                            <button class="filter-chip" id="hist-filter-stats">野球指標</button>
+                        </div>
+                        <ul id="history-list" class="player-list"></ul>
+                    </div>
+                </div>
+
+
+                <!-- Ranking Tab -->
+                <div id="ranking" class="tab-pane fade-in">
+                    <div class="glass form-container" style="max-width: 800px; margin: 0 auto;">
+                        <h2 style="text-align: center; margin-bottom: 24px;"><i class="fa-solid fa-trophy" style="color:var(--accent-orange);"></i> チーム順位</h2>
+                        <div class="ranking-filters glass" style="margin-bottom: 24px; padding: 16px; display:flex; gap:16px; flex-wrap:wrap; align-items:center; border-radius: var(--border-radius);">
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display:block; color:var(--text-secondary); font-size:0.85rem; margin-bottom:6px;">種目の選択:</label>
+                                <select id="ranking-category" class="glass-select" style="width: 100%;">
+                                    <option value="pitch">⚾ 球速 (km/h)</option>
+                                    <option value="swing">🏏 スイングスピード (km/h)</option>
+                                    <option value="longtoss">🚀 遠投 (m)</option>
+                                    <option value="dash50">🏃‍♂️ 50m走 (秒)</option>
+                                    <option value="bench">💪 ベンチプレス (kg)</option>
+                                    <option value="squat">🦵 スクワット (kg)</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1; min-width: 150px;">
+                                <label style="display:block; color:var(--text-secondary); font-size:0.85rem; margin-bottom:6px;">集計期間:</label>
+                                <select id="ranking-period" class="glass-select" style="width: 100%;">
+                                    <option value="all">全期間 (All Time)</option>
+                                    <option value="this_month">今月 (This Month)</option>
+                                    <option value="last_month">先月 (Last Month)</option>
+                                    <option value="this_year">今年 (This Year)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p style="font-size:0.75rem; color:var(--text-secondary); text-align:right; margin-top:-12px; margin-bottom:12px;">※ウエイトは10回以上挙げた記録を対象としています</p>
+                        
+                        <div id="ranking-single-view">
+                            <!-- Ranking list will be injected here via app.js -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Player Management Tab -->
+                <div id="players" class="tab-pane fade-in">
+                    <div class="glass form-container">
+                        <h2>選手管理</h2>
+                        <form id="player-form" class="dynamic-form">
+                            <div class="form-group row">
+                                <div class="col"><label>名前</label><input type="text" id="player-name" required></div>
+                                <div class="col"><label>学年</label>
+                                    <select id="player-grade" required>
+                                        <option value="大1">大1</option>
+                                        <option value="大2">大2</option>
+                                        <option value="大3">大3</option>
+                                        <option value="大4">大4</option>
+                                        <option value="院1">院1</option>
+                                        <option value="院2">院2</option>
+                                        <option value="スタッフ/その他">スタッフ/その他</option>
+                                    </select>
+                                </div>
+                                <div class="col"><label>ポジション</label><input type="text" id="player-position" required></div>
+                                <div class="col"><label>背番号</label><input type="number" id="player-number" required></div>
+                            </div>
+                            <button type="submit" class="btn-primary w-100">選手を追加</button>
+                        </form>
+                        <h3 class="mt-4">選手一覧</h3>
+                        <ul id="player-list" class="player-list"></ul>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Player Login / Registration Modal -->
+    <div id="player-auth-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass">
+            <h2 id="auth-title">ログイン</h2>
+            
+            <!-- Master Login View -->
+            <div id="auth-master-view" style="display:none; text-align: left;">
+                <p style="margin-bottom: 16px; font-size: 0.85rem; color: var(--text-secondary);">マスターアカウントでログインしてください</p>
+                <div class="form-group mb-3">
+                    <label>マスターID</label>
+                    <input type="text" id="master-id" placeholder="例: coach_yamada" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>パスワード</label>
+                    <input type="password" id="master-password" style="width: 100%;" required>
+                </div>
+                <button id="btn-master-login" class="btn-primary w-100" style="background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);">マスターログイン</button>
+                <p style="margin-top: 16px; text-align: center; font-size: 0.9rem;">
+                    <a href="#" id="link-register-master" style="color: var(--accent-blue);">新規マスターアカウント登録</a><br><br>
+                    <a href="#" id="link-login-from-master" style="color: var(--text-secondary);">選手ログインへ戻る</a>
+                </p>
+            </div>
+
+            <!-- Master Registration View -->
+            <div id="auth-master-register-view" style="display:none; text-align: left;">
+                <p style="margin-bottom: 16px; font-size: 0.85rem; color: var(--text-secondary);">新しいマスター（指導者）アカウントを作成します</p>
+                <div class="form-group mb-3">
+                    <label>マスター招待コード (必須)</label>
+                    <input type="password" id="reg-master-invite" placeholder="管理者に確認してください" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>希望するマスターID (半角英数字)</label>
+                    <input type="text" id="reg-master-id" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>あなたのお名前 (表示用)</label>
+                    <input type="text" id="reg-master-name" placeholder="例: 山田監督" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-4">
+                    <label>パスワード</label>
+                    <input type="password" id="reg-master-password" style="width: 100%;" required>
+                </div>
+                <button id="btn-register-master" class="btn-primary w-100" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);">アカウントを作成</button>
+                <p style="margin-top: 16px; text-align: center; font-size: 0.9rem;">
+                    <a href="#" id="link-login-from-master-reg" style="color: var(--text-secondary);">ログイン画面へ戻る</a>
+                </p>
+            </div>
+
+            <!-- Login View -->
+            <div id="auth-login-view">
+                <div class="form-group" style="text-align: left; margin-bottom: 16px;">
+                    <label>登録済みユーザーを選択</label>
+                    <select id="auth-player-select" style="width: 100%;">
+                        <option value="">-- 選択してください --</option>
+                    </select>
+                </div>
+                <div class="form-group mb-3" style="text-align: left;">
+                    <label>パスワード</label>
+                    <input type="password" id="auth-player-password" style="width: 100%;" required>
+                </div>
+                <button id="btn-login" class="btn-primary w-100">ログイン</button>
+                <p style="margin-top: 16px; font-size: 0.9rem; color: var(--text-secondary);">
+                    または <a href="#" id="link-register" style="color: var(--accent-blue);">新しく選手を登録する</a>
+                </p>
+            </div>
+
+            <!-- Registration View -->
+            <div id="auth-register-view" style="display:none; text-align: left;">
+                <p style="margin-bottom: 16px; font-size: 0.85rem; color: var(--text-secondary);">クラウドIDが自動的に付与されます</p>
+                <div class="form-group mb-3">
+                    <label>名前</label>
+                    <input type="text" id="reg-name" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>学年</label>
+                    <select id="reg-grade" style="width: 100%;" required>
+                        <option value="大1">大1</option>
+                        <option value="大2">大2</option>
+                        <option value="大3">大3</option>
+                        <option value="大4">大4</option>
+                        <option value="院1">院1</option>
+                        <option value="院2">院2</option>
+                        <option value="スタッフ/その他">スタッフ/その他</option>
+                    </select>
+                </div>
+                <div class="form-group mb-3">
+                    <label>ポジション</label>
+                    <input type="text" id="reg-position" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>背番号</label>
+                    <input type="number" id="reg-number" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>パスワード (6文字以上)</label>
+                    <input type="password" id="reg-password" style="width: 100%;" required>
+                </div>
+                <div class="form-group mb-4">
+                    <label>パスワード (確認)</label>
+                    <input type="password" id="reg-password-confirm" style="width: 100%;" required>
+                </div>
+                <button id="btn-register" class="btn-primary w-100">登録してはじめる</button>
+                <p style="margin-top: 16px; text-align: center; font-size: 0.9rem;">
+                    <a href="#" id="link-login" style="color: var(--text-secondary);">戻る</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Send Comment Modal -->
+    <div id="send-comment-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass">
+            <h2><i class="fa-solid fa-envelope"></i> コメントを送信</h2>
+            <form id="send-comment-form" class="dynamic-form" style="text-align: left;">
+                <input type="hidden" id="comment-target-id">
+                <p style="margin-bottom: 12px; font-weight: bold;">宛先: <span id="comment-target-name" style="color: var(--accent-blue);"></span></p>
+                <div class="form-group mb-3">
+                    <label>メッセージ内容</label>
+                    <textarea id="comment-content" class="w-100" rows="4" style="resize: vertical; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.5);" required></textarea>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 16px;">
+                    <button type="button" class="btn-outline w-100" id="btn-cancel-comment">キャンセル</button>
+                    <button type="submit" class="btn-primary w-100">送信する</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Record Modal -->
+    <div id="edit-record-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass">
+            <h2>記録の編集</h2>
+            <form id="edit-record-form" class="dynamic-form" style="text-align: left;">
+                <input type="hidden" id="edit-record-id">
+                <input type="hidden" id="edit-record-type">
+                
+                <div id="edit-fields-container"></div>
+
+                <div style="display: flex; gap: 8px; margin-top: 16px;">
+                    <button type="button" class="btn-outline w-100" id="btn-cancel-edit">キャンセル</button>
+                    <button type="submit" class="btn-primary w-100">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Player Modal -->
+    <div id="edit-player-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass">
+            <h2>選手情報の編集</h2>
+            <form id="edit-player-form" class="dynamic-form" style="text-align: left;">
+                <input type="hidden" id="edit-player-id">
+                
+                <div class="form-group mb-3">
+                    <label>名前</label>
+                    <input type="text" id="edit-player-name" class="w-100" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label>学年</label>
+                    <select id="edit-player-grade" class="w-100" required>
+                        <option value="大1">大1</option>
+                        <option value="大2">大2</option>
+                        <option value="大3">大3</option>
+                        <option value="大4">大4</option>
+                        <option value="院1">院1</option>
+                        <option value="院2">院2</option>
+                        <option value="スタッフ/その他">スタッフ/その他</option>
+                    </select>
+                </div>
+                <div class="form-group mb-3">
+                    <label>ポジション</label>
+                    <input type="text" id="edit-player-position" class="w-100" required>
+                </div>
+                <div class="form-group mb-4">
+                    <label>背番号</label>
+                    <input type="number" id="edit-player-number" class="w-100" required>
+                </div>
+                <!-- Master Only: Password View -->
+                <div class="form-group mb-4 master-only" id="edit-player-password-container" style="display:none; background:rgba(239,68,68,0.1); padding:12px; border-radius:8px; border:1px dashed rgba(239,68,68,0.5);">
+                    <label style="color:var(--accent-red); margin-bottom: 8px;">現在のパスワード (マスター専用)</label>
+                    <input type="text" id="edit-player-password-view" class="w-100" readonly style="background:transparent; border-color:var(--accent-red); color:var(--text-primary); padding: 8px;">
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:6px;">※ここからパスワードの変更はできません。</p>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 16px;">
+                    <button type="button" class="btn-outline w-100" id="btn-cancel-player-edit">キャンセル</button>
+                    <button type="submit" class="btn-primary w-100">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- The main UI logic is in app.js, which will now use window methods exposed by firebase-db.js -->
+    <script src="app.js?v=4"></script>
+    <!-- Chat Modal Overlay -->
+    <div id="chat-modal-overlay" class="modal-overlay" style="display:none;">
+        <div class="modal glass chat-modal">
+            <div class="chat-header">
+                <h3><i class="fa-solid fa-comments"></i> <span id="chat-target-name">チャット</span></h3>
+                <button id="btn-close-chat" class="btn-close-icon"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="chat-messages" class="chat-messages-container">
+                <!-- Messages will be injected here -->
+            </div>
+            <form id="chat-form" class="chat-input-area">
+                <input type="text" id="chat-input-text" placeholder="メッセージを入力..." required autocomplete="off">
+                <button type="submit" id="btn-send-chat" class="btn-send"><i class="fa-solid fa-paper-plane"></i></button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Account Settings Modal -->
+    <div id="account-settings-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass" style="max-height: 90vh; overflow-y: auto; text-align: left; padding: 24px; min-width: 320px;">
+            <h2 style="margin-bottom: 20px;"><i class="fa-solid fa-user-gear"></i> アカウント設定</h2>
+            
+            <div class="settings-section">
+                <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--accent-blue);"><i class="fa-solid fa-image"></i> アバター（画像）変更</h3>
+                <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px;">
+                    <img id="settings-avatar-preview" src="https://api.dicebear.com/6.x/avataaars/svg?seed=Guest&backgroundColor=3b82f6" alt="Preview" style="width: 80px; height: 80px; border-radius: 50%; background: rgba(255,255,255,0.1); border: 2px solid var(--border-color);">
+                    <div style="flex: 1;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">スタイル</label>
+                        <select id="settings-avatar-style" class="glass-select w-100 mb-2" style="margin-bottom: 8px;">
+                            <option value="avataaars">Avataaars (人物)</option>
+                            <option value="bottts">Bottts (ロボット)</option>
+                            <option value="fun-emoji">Fun Emoji (絵文字)</option>
+                            <option value="shapes">Shapes (図形)</option>
+                            <option value="custom">任意の画像（アップロード）</option>
+                        </select>
+                        <div id="settings-avatar-seed-container">
+                            <label style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">自分だけの言葉（シード）</label>
+                            <input type="text" id="settings-avatar-seed" class="w-100" placeholder="例: Yamada" style="padding: 8px;">
+                        </div>
+                        <div id="custom-avatar-upload-area" style="display: none; margin-top: 8px;">
+                            <input type="file" id="settings-avatar-upload" accept="image/*" class="w-100" style="padding: 6px; font-size: 0.8rem; border: 1px dashed var(--accent-blue);">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px dashed var(--border-glass); margin: 24px 0;">
+
+            <div class="settings-section">
+                <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--accent-orange);"><i class="fa-solid fa-address-card"></i> 基本情報・目標</h3>
+                <form id="settings-profile-form">
+                    <div class="form-group mb-3">
+                        <label>表示名</label>
+                        <input type="text" id="settings-name" class="w-100" required>
+                    </div>
+                    <div class="form-group row mb-3">
+                        <div class="col">
+                            <label>学年</label>
+                            <select id="settings-grade" class="w-100" required>
+                                <option value="大1">大1</option>
+                                <option value="大2">大2</option>
+                                <option value="大3">大3</option>
+                                <option value="大4">大4</option>
+                                <option value="院1">院1</option>
+                                <option value="院2">院2</option>
+                                <option value="スタッフ/その他">スタッフ/その他</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                            <label>ポジション</label>
+                            <input type="text" id="settings-position" class="w-100">
+                        </div>
+                        <div class="col">
+                            <label>背番号</label>
+                            <input type="number" id="settings-number" class="w-100">
+                        </div>
+                    </div>
+                    <div class="form-group mb-3">
+                        <label>今シーズンの目標 (ひとこと)</label>
+                        <input type="text" id="settings-goal" class="w-100" placeholder="例：球速145km/h到達！" maxlength="40">
+                    </div>
+                    <button type="submit" class="btn-primary w-100">プロフィールとアバターを保存</button>
+                    <p id="settings-profile-msg" style="color: var(--accent-green); font-size: 0.8rem; margin-top: 8px; display: none; text-align: center;">保存しました</p>
+                </form>
+            </div>
+
+            <hr style="border: 0; border-top: 1px dashed var(--border-glass); margin: 24px 0;">
+
+            <div class="settings-section">
+                <h3 style="font-size: 1rem; margin-bottom: 12px; color: #10b981;"><i class="fa-solid fa-palette"></i> テーマカラー</h3>
+                <div id="theme-color-selector" style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <div class="theme-color-btn active" data-color="orange" style="width:36px; height:36px; border-radius:50%; background:#f97316; cursor:pointer; border:2px solid transparent; transition: all 0.2s;"></div>
+                    <div class="theme-color-btn" data-color="blue" style="width:36px; height:36px; border-radius:50%; background:#3b82f6; cursor:pointer; border:2px solid transparent; transition: all 0.2s;"></div>
+                    <div class="theme-color-btn" data-color="green" style="width:36px; height:36px; border-radius:50%; background:#10b981; cursor:pointer; border:2px solid transparent; transition: all 0.2s;"></div>
+                    <div class="theme-color-btn" data-color="purple" style="width:36px; height:36px; border-radius:50%; background:#8b5cf6; cursor:pointer; border:2px solid transparent; transition: all 0.2s;"></div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px dashed var(--border-glass); margin: 24px 0;">
+
+            <div class="settings-section">
+                <h3 style="font-size: 1rem; margin-bottom: 12px; color: #f59e0b;"><i class="fa-solid fa-key"></i> パスワード変更</h3>
+                <form id="settings-password-form">
+                    <div class="form-group mb-3">
+                        <label>現在のパスワード</label>
+                        <input type="password" id="settings-pwd-current" class="w-100" required>
+                    </div>
+                    <div class="form-group mb-3">
+                        <label>新しいパスワード (6文字以上)</label>
+                        <input type="password" id="settings-pwd-new" class="w-100" required minlength="6">
+                    </div>
+                    <button type="submit" class="btn-primary w-100" style="background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);">パスワードを変更</button>
+                    <p id="settings-pwd-msg" style="color: var(--accent-orange); font-size: 0.8rem; margin-top: 8px; display: none; text-align: center;"></p>
+                </form>
+            </div>
+
+            <hr style="border: 0; border-top: 1px dashed rgba(239,68,68,0.3); margin: 24px 0;">
+
+            <div class="settings-section">
+                <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--accent-red);"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">アカウントを削除すると、紐づくすべてのデータが消去され、元に戻せません。</p>
+                <button type="button" id="btn-delete-account" class="btn-outline w-100" style="border-color: rgba(239,68,68,0.5); color: var(--accent-red);">アカウントを完全に削除する</button>
+            </div>
+
+            <div style="margin-top: 32px;">
+                <button type="button" class="btn-outline w-100" id="btn-close-settings">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Monitor -->
+    <div id="debug-monitor" style="position:fixed; bottom:0; right:0; background:rgba(0,0,0,0.8); color:#0f0; padding:10px; font-family:monospace; font-size:12px; z-index:9999; display:none;">
+        Auth Version: 2.1<br>
+        Status: <span id="debug-status">Initializing...</span>
+    </div>
+</body>
+</html>
