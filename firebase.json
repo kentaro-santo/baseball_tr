@@ -3,7 +3,17 @@
     "public": ".",
     "ignore": [
       "firebase.json",
+      "firestore.rules",
+      "firestore.indexes.json",
+      "*.md",
+      "**/*.md",
       "**/.*",
+      ".git/**",
+      "**/.git/**",
+      "log/**",
+      "plan/**",
+      "node/**",
+      "baseball_tr/**",
       "**/node_modules/**"
     ],
     "headers": [

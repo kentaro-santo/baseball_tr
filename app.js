@@ -86,7 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // View Toggle Constants
     const viewportMeta = document.getElementById('viewport-meta');
     const viewToggleBtn = document.getElementById('view-toggle-btn');
-    const viewToggleText = document.getElementById('view-toggle-text');
     let isDesktopView = localStorage.getItem('forceDesktopView') === 'true';
 
     // ---------- Sidebar & Navigation ----------
@@ -99,13 +98,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 tabPanes.forEach(pane => pane.classList.remove('active'));
                 link.classList.add('active');
                 const targetTab = link.getAttribute('data-tab');
-                document.getElementById(targetTab).classList.add('active');
+                const targetPane = document.getElementById(targetTab);
+                if (!targetPane) return;
+                targetPane.classList.add('active');
                 pageTitle.innerText = link.innerText.trim();
 
                 // Mobile specific: close sidebar
                 if (window.innerWidth <= 900) {
-                    sidebar.classList.remove('open');
-                    sidebarOverlay.classList.remove('active');
+                    sidebar?.classList.remove('open');
+                    sidebarOverlay?.classList.remove('active');
                 }
             });
         });
@@ -146,30 +147,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---------- View Toggle Logic (PC / Mobile) ----------
 
+    function updateViewToggleButton(iconClass, label) {
+        if (!viewToggleBtn) return;
+
+        const icon = viewToggleBtn.querySelector('i');
+        const text = viewToggleBtn.querySelector('#view-toggle-text');
+
+        if (icon) icon.className = `fa-solid ${iconClass}`;
+        if (text) text.textContent = label;
+
+        viewToggleBtn.title = label;
+        viewToggleBtn.setAttribute('aria-label', label);
+    }
+
     function applyViewMode() {
+        if (!viewportMeta) return;
+
         if (isDesktopView) {
             // Force desktop width
             viewportMeta.setAttribute('content', 'width=1024, user-scalable=yes');
-            if(viewToggleText) viewToggleText.innerText = 'スマホ版に戻す';
-            if(viewToggleBtn) viewToggleBtn.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> <span class="hide-mobile" id="view-toggle-text">スマホ版に戻す</span>';
+            updateViewToggleButton('fa-mobile-screen', 'スマホ版に戻す');
         } else {
             // Default responsive
             viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-            if(viewToggleText) viewToggleText.innerText = 'PC版で表示';
-            if(viewToggleBtn) viewToggleBtn.innerHTML = '<i class="fa-solid fa-desktop"></i> <span class="hide-mobile" id="view-toggle-text">PC版で表示</span>';
+            updateViewToggleButton('fa-desktop', 'PC版で表示');
+            sidebar?.classList.remove('open');
+            sidebarOverlay?.classList.remove('active');
         }
     }
-
-    if (viewToggleBtn) {
-        viewToggleBtn.addEventListener('click', () => {
-            isDesktopView = !isDesktopView;
-            localStorage.setItem('forceDesktopView', isDesktopView);
-            applyViewMode();
-        });
-    }
-
-    // Apply initially
-    applyViewMode();
 
     // ---------- Chart Helpers ----------
 
@@ -278,6 +283,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add Record Button Animation
         document.getElementById('add-record-btn')?.addEventListener('click', () => {
             alert('新規記録モーダルを開きます (機能実装予定)');
+        });
+
+        // 「その他」選択時のメモ欄 show/hide
+        document.getElementById('train-type')?.addEventListener('change', (e) => {
+            const group = document.getElementById('train-other-memo-group');
+            if (group) group.style.display = e.target.value === 'その他' ? 'block' : 'none';
+        });
+
+        document.getElementById('stat-type')?.addEventListener('change', (e) => {
+            const group = document.getElementById('stat-other-memo-group');
+            if (group) group.style.display = e.target.value === 'その他' ? 'block' : 'none';
         });
     }
 
@@ -595,6 +611,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (formId === 'training-form') {
                     const setsInput = document.getElementById('train-sets');
                     if (setsInput) setsInput.value = 3;
+                    const memoGroup = document.getElementById('train-other-memo-group');
+                    if (memoGroup) memoGroup.style.display = 'none';
+                }
+                if (formId === 'stats-form') {
+                    const memoGroup = document.getElementById('stat-other-memo-group');
+                    if (memoGroup) memoGroup.style.display = 'none';
                 }
 
                 await updateDashboard();
@@ -626,13 +648,19 @@ document.addEventListener('DOMContentLoaded', () => {
         type: document.getElementById('train-type').value,
         weight: parseFloat(document.getElementById('train-weight').value),
         reps: parseInt(document.getElementById('train-reps').value),
-        sets: parseInt(document.getElementById('train-sets').value)
+        sets: parseInt(document.getElementById('train-sets').value),
+        otherMemo: document.getElementById('train-type').value === 'その他'
+            ? document.getElementById('train-other-memo').value
+            : ''
     }), 'トレーニング記録を保存しました！');
 
     handleFormSubmit('stats-form', 'statsRecords', () => ({
         date: document.getElementById('stat-date').value,
         type: document.getElementById('stat-type').value,
-        value: parseFloat(document.getElementById('stat-val').value)
+        value: parseFloat(document.getElementById('stat-val').value),
+        otherMemo: document.getElementById('stat-type').value === 'その他'
+            ? document.getElementById('stat-other-memo').value
+            : ''
     }), '野球指標を保存しました！');
 
     // Add Record Button Animation

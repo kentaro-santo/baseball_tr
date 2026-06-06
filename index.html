@@ -63,10 +63,10 @@
             <!-- Header -->
             <header class="top-header">
                 <div style="display: flex; align-items: center; gap: 12px; flex: 1; overflow: hidden;">
-                    <button id="mobile-menu-btn" class="mobile-menu-btn"><i class="fa-solid fa-bars"></i></button>
                     <h1 id="page-title">ダッシュボード</h1>
                 </div>
                 <div class="header-actions">
+                    <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="メニューを開く"><i class="fa-solid fa-bars"></i></button>
                     <button class="btn-outline" id="view-toggle-btn" style="padding: 8px 16px; border-radius: 20px; font-size: 0.85rem;" title="PC/スマホ表示切替">
                         <i class="fa-solid fa-desktop"></i> <span id="view-toggle-text">PC版で表示</span>
                     </button>
@@ -378,12 +378,17 @@
                                         <option>ペンタゴンクリーン</option>
                                         <option>フロントスクワット</option>
                                         <option>デッドリフト</option>
+                                        <option value="その他">その他</option>
                                     </select>
                                 </div>
                                 <div class="col">
                                     <label>実施日</label>
                                     <input type="date" id="train-date" required>
                                 </div>
+                            </div>
+                            <div class="form-group" id="train-other-memo-group" style="display:none;">
+                                <label>メモ（自由記入）</label>
+                                <input type="text" id="train-other-memo" placeholder="種目名や詳細を自由に入力...">
                             </div>
                             <div class="form-group row">
                                 <div class="col">
@@ -418,14 +423,17 @@
                                         <option>球速 (km/h)</option>
                                         <option>スイングスピード (km/h)</option>
                                         <option>50m走 (秒)</option>
-                                        <option>遠投 (m)</option>
-                                        <option>回転数 (rpm)</option>
+                                        <option value="その他">その他</option>
                                     </select>
                                 </div>
                                 <div class="col">
                                     <label>実施日</label>
                                     <input type="date" id="stat-date" required>
                                 </div>
+                            </div>
+                            <div class="form-group" id="stat-other-memo-group" style="display:none;">
+                                <label>メモ（自由記入）</label>
+                                <input type="text" id="stat-other-memo" placeholder="内容を自由に入力...">
                             </div>
                             <div class="form-group">
                                 <label>記録数値</label>
@@ -713,7 +721,7 @@
     </div>
 
     <!-- The main UI logic is in app.js, which will now use window methods exposed by firebase-db.js -->
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
     <!-- Chat Modal Overlay -->
     <div id="chat-modal-overlay" class="modal-overlay" style="display:none;">
         <div class="modal glass chat-modal">
