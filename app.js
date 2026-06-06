@@ -1619,6 +1619,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <select id="edit-train-type" class="w-100" required>
                         <option value="スクワット" ${rec.type === 'スクワット' ? 'selected' : ''}>スクワット</option>
                         <option value="ベンチプレス" ${rec.type === 'ベンチプレス' ? 'selected' : ''}>ベンチプレス</option>
+                        <option value="ベンチプレス（ローテーションあり）" ${rec.type === 'ベンチプレス（ローテーションあり）' ? 'selected' : ''}>ベンチプレス（ローテーションあり）</option>
+                        <option value="ベンチプレス（ローテーションなし）" ${rec.type === 'ベンチプレス（ローテーションなし）' ? 'selected' : ''}>ベンチプレス（ローテーションなし）</option>
+                        <option value="ストレートバー" ${rec.type === 'ストレートバー' ? 'selected' : ''}>ストレートバー</option>
                         <option value="ボックスジャンプ" ${rec.type === 'ボックスジャンプ' ? 'selected' : ''}>ボックスジャンプ</option>
                         <option value="10m走" ${rec.type === '10m走' ? 'selected' : ''}>10m走</option>
                         <option value="メディシンボールスロー(前)" ${rec.type === 'メディシンボールスロー(前)' ? 'selected' : ''}>メディシンボールスロー(前)</option>
@@ -1627,10 +1630,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <option value="メディシンボールスロー(サイド)" ${rec.type === 'メディシンボールスロー(サイド)' ? 'selected' : ''}>メディシンボールスロー(サイド)</option>
                         <option value="立幅" ${rec.type === '立幅' ? 'selected' : ''}>立幅</option>
                         <option value="立ち三段" ${rec.type === '立ち三段' ? 'selected' : ''}>立ち三段</option>
-                        <option value="クリーン" ${rec.type === 'クリーン' ? 'selected' : ''}>クリーン</option>
                         <option value="ペンタゴンクリーン" ${rec.type === 'ペンタゴンクリーン' ? 'selected' : ''}>ペンタゴンクリーン</option>
                         <option value="フロントスクワット" ${rec.type === 'フロントスクワット' ? 'selected' : ''}>フロントスクワット</option>
+                        <option value="バックスクワット" ${rec.type === 'バックスクワット' ? 'selected' : ''}>バックスクワット</option>
                         <option value="デッドリフト" ${rec.type === 'デッドリフト' ? 'selected' : ''}>デッドリフト</option>
+                        <option value="懸垂" ${rec.type === '懸垂' ? 'selected' : ''}>懸垂</option>
                     </select>
                 </div>
                 <div class="form-group mb-3 row">
