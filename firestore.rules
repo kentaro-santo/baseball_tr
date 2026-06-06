@@ -1,13 +1,95 @@
 rules_version = '2';
 
-// TEMPORARY BOOTSTRAP RULES
-// These rules allow any authenticated user to write.
-// Replace with proper rules after first master is created.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMaster() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/players/$(request.auth.uid)).data.role == 'master';
+    }
+
+    match /players/{playerId} {
+      allow read: if true; // Required for login dropdown and public player lookup
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == playerId &&
+        request.resource.data.id == playerId &&
+        request.resource.data.role == 'player' &&
+        request.resource.data.email is string;
+
+      allow update: if isSignedIn() && (
+        isMaster() ||
+        (request.auth.uid == playerId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.id == resource.data.id &&
+          request.resource.data.email == resource.data.email)
+      );
+
+      allow delete: if isSignedIn() && (isMaster() || request.auth.uid == playerId);
+    }
+
+    match /weightRecords/{recordId} {
+      allow read: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.playerId == request.auth.uid &&
+        request.resource.data.playerId is string &&
+        request.resource.data.createdAt is string;
+
+      allow update, delete: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+    }
+
+    match /trainingRecords/{recordId} {
+      allow read: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.playerId == request.auth.uid &&
+        request.resource.data.playerId is string &&
+        request.resource.data.createdAt is string;
+
+      allow update, delete: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+    }
+
+    match /statsRecords/{recordId} {
+      allow read: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.playerId == request.auth.uid &&
+        request.resource.data.playerId is string &&
+        request.resource.data.createdAt is string;
+
+      allow update, delete: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid);
+    }
+
+    match /comments/{commentId} {
+      allow read: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid || resource.data.senderId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.playerId is string &&
+        request.resource.data.senderName is string &&
+        request.resource.data.content is string &&
+        request.resource.data.date is string;
+
+      allow update: if isSignedIn() &&
+        (isMaster() || resource.data.playerId == request.auth.uid || resource.data.senderId == request.auth.uid);
+
+      allow delete: if isSignedIn() &&
+        (isMaster() || resource.data.senderId == request.auth.uid);
+    }
+
+    match /masters_auth/{uid} {
+      allow read, write: if false;
     }
   }
 }
