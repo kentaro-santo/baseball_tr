@@ -281,6 +281,45 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ========== UI INITIALIZATION (Priority: Early & Reliable) ==========
+    function initUiHelpers() {
+        try {
+            const APP_VERSION = '2.1';
+            const versionEl = document.getElementById('app-version');
+            if (versionEl) versionEl.textContent = `v${APP_VERSION}`;
+
+            const buttons = document.querySelectorAll('.pwd-toggle');
+            console.log(`[initUiHelpers] Found ${buttons.length} pwd-toggle buttons`);
+            
+            buttons.forEach((btn, idx) => {
+                const targetId = btn.dataset.target;
+                const input = document.getElementById(targetId);
+                if (!input) {
+                    console.warn(`[initUiHelpers] Button ${idx}: Target input #${targetId} not found`);
+                    return;
+                }
+                
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const show = input.type === 'password';
+                    input.type = show ? 'text' : 'password';
+                    const icon = btn.querySelector('i');
+                    if (icon) icon.className = `fa-solid ${show ? 'fa-eye-slash' : 'fa-eye'}`;
+                    btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+                    console.log(`[pwd-toggle] Button ${idx} toggled: ${input.type}`);
+                });
+                console.log(`[initUiHelpers] Button ${idx} (#${targetId}) event listener registered`);
+            });
+            console.log('[initUiHelpers] Initialization complete');
+        } catch (e) {
+            console.error('[initUiHelpers] Error:', e);
+        }
+    }
+
+    // Call immediately
+    initUiHelpers();
+
     initEventListeners();
 
     // ---------- Dashboard Helpers ----------
@@ -1018,7 +1057,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 applyThemeColor('blue');
             }
         }
-        applyRoleVisibility();
+        // Sidebar profile updated; do not re-run applyRoleVisibility() here to avoid recursive loops.
     }
 
     // Simplified navigation within auth modal
@@ -1882,8 +1921,10 @@ document.addEventListener('DOMContentLoaded', () => {
         view.innerHTML = '<div style="text-align:center; width:100%; opacity:0.5; padding: 40px;">ランキングを集計中...</div>';
 
         const players = await loadPlayers();
-        const stats = await window.fbGetRecords('statsRecords', null);
-        const trainings = await window.fbGetRecords('trainingRecords', null);
+        const role = localStorage.getItem('userRole') || 'player';
+        const currentPlayerId = localStorage.getItem('currentPlayerId');
+        const stats = await window.fbGetRecords('statsRecords', role === 'master' ? null : currentPlayerId);
+        const trainings = await window.fbGetRecords('trainingRecords', role === 'master' ? null : currentPlayerId);
         
         const playerMap = {};
         players.forEach(p => playerMap[p.id] = p);
