@@ -79,7 +79,7 @@ window.fbGetPlayers = async function() {
   const querySnapshot = await db.collection("players").get();
   const players = [];
   querySnapshot.forEach((doc) => {
-    players.push({ id: doc.id, ...doc.data() });
+    players.push({ ...doc.data(), id: doc.id });
   });
   return players;
 }

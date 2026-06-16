@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ========== UI INITIALIZATION (Priority: Early & Reliable) ==========
     function initUiHelpers() {
         try {
-            const APP_VERSION = '2.1';
+            const APP_VERSION = '2.2';
             const versionEl = document.getElementById('app-version');
             if (versionEl) versionEl.textContent = `v${APP_VERSION}`;
 
@@ -1090,10 +1090,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('btn-register-master')?.addEventListener('click', async () => {
-        const invite = document.getElementById('reg-master-invite').value;
-        const id = document.getElementById('reg-master-id').value.trim();
-        const name = document.getElementById('reg-master-name').value.trim();
-        const pass = document.getElementById('reg-master-password').value;
+        const invite = authMasterRegisterView.querySelector('#reg-master-invite').value;
+        const id = authMasterRegisterView.querySelector('#reg-master-id').value.trim();
+        const name = authMasterRegisterView.querySelector('#reg-master-name').value.trim();
+        const pass = authMasterRegisterView.querySelector('#reg-master-password').value;
 
         if (!invite || !id || !name || !pass) {
             alert('すべての項目を入力してください。');
@@ -1125,9 +1125,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.getElementById('btn-login')?.addEventListener('click', async () => {
-        const selectedId = authPlayerSelect.value;
-        const password = document.getElementById('auth-player-password').value;
+    document.getElementById('btn-login')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const loginSelect = playerAuthModal.querySelector('#auth-login-view #auth-player-select');
+        const loginPasswordInput = playerAuthModal.querySelector('#auth-login-view #auth-player-password');
+        const selectedId = loginSelect?.value || '';
+        const password = loginPasswordInput?.value || '';
+        console.log('[login] selectedId:', selectedId, 'passwordLength:', password.length);
         
         if (!selectedId || !password) {
             alert('ユーザーを選択し、パスワードを入力してください');
@@ -1172,8 +1176,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const grade = document.getElementById('reg-grade').value;
             const position = document.getElementById('reg-position').value.trim();
             const number = document.getElementById('reg-number').value;
-            const pass = document.getElementById('reg-password').value;
-            const passConfirm = document.getElementById('reg-password-confirm').value;
+            const pass = authRegisterView.querySelector('#reg-password').value;
+            const passConfirm = authRegisterView.querySelector('#reg-password-confirm').value;
 
             if (!name || !position || !number || !pass) {
                 alert('すべての項目を入力してください');
