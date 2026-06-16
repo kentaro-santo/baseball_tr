@@ -86,7 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // View Toggle Constants
     const viewportMeta = document.getElementById('viewport-meta');
     const viewToggleBtn = document.getElementById('view-toggle-btn');
-    const viewToggleText = document.getElementById('view-toggle-text');
     let isDesktopView = localStorage.getItem('forceDesktopView') === 'true';
 
     // ---------- Sidebar & Navigation ----------
@@ -99,13 +98,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 tabPanes.forEach(pane => pane.classList.remove('active'));
                 link.classList.add('active');
                 const targetTab = link.getAttribute('data-tab');
-                document.getElementById(targetTab).classList.add('active');
+                const targetPane = document.getElementById(targetTab);
+                if (!targetPane) return;
+                targetPane.classList.add('active');
                 pageTitle.innerText = link.innerText.trim();
 
                 // Mobile specific: close sidebar
                 if (window.innerWidth <= 900) {
-                    sidebar.classList.remove('open');
-                    sidebarOverlay.classList.remove('active');
+                    sidebar?.classList.remove('open');
+                    sidebarOverlay?.classList.remove('active');
                 }
             });
         });
@@ -146,30 +147,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---------- View Toggle Logic (PC / Mobile) ----------
 
+    function updateViewToggleButton(iconClass, label) {
+        if (!viewToggleBtn) return;
+
+        const icon = viewToggleBtn.querySelector('i');
+        const text = viewToggleBtn.querySelector('#view-toggle-text');
+
+        if (icon) icon.className = `fa-solid ${iconClass}`;
+        if (text) text.textContent = label;
+
+        viewToggleBtn.title = label;
+        viewToggleBtn.setAttribute('aria-label', label);
+    }
+
     function applyViewMode() {
+        if (!viewportMeta) return;
+
         if (isDesktopView) {
             // Force desktop width
             viewportMeta.setAttribute('content', 'width=1024, user-scalable=yes');
-            if(viewToggleText) viewToggleText.innerText = 'スマホ版に戻す';
-            if(viewToggleBtn) viewToggleBtn.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> <span class="hide-mobile" id="view-toggle-text">スマホ版に戻す</span>';
+            updateViewToggleButton('fa-mobile-screen', 'スマホ版に戻す');
         } else {
             // Default responsive
             viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-            if(viewToggleText) viewToggleText.innerText = 'PC版で表示';
-            if(viewToggleBtn) viewToggleBtn.innerHTML = '<i class="fa-solid fa-desktop"></i> <span class="hide-mobile" id="view-toggle-text">PC版で表示</span>';
+            updateViewToggleButton('fa-desktop', 'PC版で表示');
+            sidebar?.classList.remove('open');
+            sidebarOverlay?.classList.remove('active');
         }
     }
-
-    if (viewToggleBtn) {
-        viewToggleBtn.addEventListener('click', () => {
-            isDesktopView = !isDesktopView;
-            localStorage.setItem('forceDesktopView', isDesktopView);
-            applyViewMode();
-        });
-    }
-
-    // Apply initially
-    applyViewMode();
 
     // ---------- Chart Helpers ----------
 
@@ -236,6 +241,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---------- Event Listeners ----------
 
+    function isMedicineBallType(typeName) {
+        return /メディシンボール/.test(typeName || '');
+    }
+
+    function getTrainingValueLabel(typeName) {
+        return isMedicineBallType(typeName) ? '飛距離 (m)' : '重量 (kg)';
+    }
+
+    function getTrainingValueUnit(typeName) {
+        return isMedicineBallType(typeName) ? 'm' : 'kg';
+    }
+
+    function formatTrainingRecordLabel(record) {
+        const unit = getTrainingValueUnit(record.type);
+        if (isMedicineBallType(record.type)) {
+            return `${record.date} - ${record.type}: ${record.weight}${unit}`;
+        }
+        return `${record.date} - ${record.type}: ${record.weight}${unit} x ${record.reps}回 x ${record.sets}セット`;
+    }
+
+    function updateTrainingInputMode(typeName) {
+        const isDistance = isMedicineBallType(typeName);
+        const label = document.getElementById('train-value-label');
+        const valueInput = document.getElementById('train-weight');
+        const repsCol = document.getElementById('train-reps-col');
+        const setsCol = document.getElementById('train-sets-col');
+        const repsInput = document.getElementById('train-reps');
+        const setsInput = document.getElementById('train-sets');
+
+        if (label) label.textContent = getTrainingValueLabel(typeName);
+        if (valueInput) valueInput.placeholder = isDistance ? '例: 8.75' : '例: 80';
+        if (repsCol) repsCol.style.display = isDistance ? 'none' : '';
+        if (setsCol) setsCol.style.display = isDistance ? 'none' : '';
+        if (repsInput) repsInput.required = !isDistance;
+        if (setsInput) setsInput.required = !isDistance;
+        if (isDistance) {
+            if (repsInput) repsInput.value = '1';
+            if (setsInput) setsInput.value = '1';
+        }
+    }
+
+    function updateEditTrainingInputMode(typeName) {
+        const isDistance = isMedicineBallType(typeName);
+        const label = document.getElementById('edit-train-value-label');
+        const valueInput = document.getElementById('edit-train-weight');
+        const repsCol = document.getElementById('edit-train-reps-col');
+        const setsCol = document.getElementById('edit-train-sets-col');
+        const repsInput = document.getElementById('edit-train-reps');
+        const setsInput = document.getElementById('edit-train-sets');
+
+        if (label) label.textContent = getTrainingValueLabel(typeName);
+        if (valueInput) valueInput.placeholder = isDistance ? '例: 8.75' : '';
+        if (repsCol) repsCol.style.display = isDistance ? 'none' : '';
+        if (setsCol) setsCol.style.display = isDistance ? 'none' : '';
+        if (repsInput) repsInput.required = !isDistance;
+        if (setsInput) setsInput.required = !isDistance;
+        if (isDistance) {
+            if (repsInput) repsInput.value = repsInput.value || '1';
+            if (setsInput) setsInput.value = setsInput.value || '1';
+        }
+    }
+
     function initEventListeners() {
         // Toggle logic for message history
         document.getElementById('toggle-comments-history')?.addEventListener('click', () => {
@@ -279,14 +346,27 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('add-record-btn')?.addEventListener('click', () => {
             alert('新規記録モーダルを開きます (機能実装予定)');
         });
+
+        // 「その他」選択時のメモ欄 show/hide
+        document.getElementById('train-type')?.addEventListener('change', (e) => {
+            const group = document.getElementById('train-other-memo-group');
+            if (group) group.style.display = e.target.value === 'その他' ? 'block' : 'none';
+            updateTrainingInputMode(e.target.value);
+        });
+
+        document.getElementById('stat-type')?.addEventListener('change', (e) => {
+            const group = document.getElementById('stat-other-memo-group');
+            if (group) group.style.display = e.target.value === 'その他' ? 'block' : 'none';
+        });
     }
 
     // ========== UI INITIALIZATION (Priority: Early & Reliable) ==========
     function initUiHelpers() {
         try {
-            const APP_VERSION = '2.2';
+            const APP_VERSION = '2.7';
             const versionEl = document.getElementById('app-version');
             if (versionEl) versionEl.textContent = `v${APP_VERSION}`;
+            updateTrainingInputMode(document.getElementById('train-type')?.value || '');
 
             const buttons = document.querySelectorAll('.pwd-toggle');
             console.log(`[initUiHelpers] Found ${buttons.length} pwd-toggle buttons`);
@@ -416,7 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (trainingChartInstance) {
             trainingChartInstance.data.labels = aggTrain.map(d => d.date.substring(5));
-            trainingChartInstance.data.datasets[0].label = `${trainingType} (kg)`;
+            trainingChartInstance.data.datasets[0].label = `${trainingType} (${getTrainingValueUnit(trainingType)})`;
             trainingChartInstance.data.datasets[0].data = aggTrain.map(d => d.value);
             trainingChartInstance.update();
         }
@@ -435,6 +515,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 5. Ratio Chart
         if (ratioChartInstance) {
+            if (isMedicineBallType(trainingType)) {
+                ratioChartInstance.data.labels = [];
+                ratioChartInstance.data.datasets[0].data = [];
+                ratioChartInstance.update();
+                return;
+            }
             const sortedWeights = [...allWeights].sort((a,b) => new Date(a.date) - new Date(b.date));
             const trainingBySelectedType = allTraining.filter(t => t.type === trainingType);
             const ratioPoints = [];
@@ -634,6 +720,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (formId === 'training-form') {
                     const setsInput = document.getElementById('train-sets');
                     if (setsInput) setsInput.value = 3;
+                    const memoGroup = document.getElementById('train-other-memo-group');
+                    if (memoGroup) memoGroup.style.display = 'none';
+                }
+                if (formId === 'stats-form') {
+                    const memoGroup = document.getElementById('stat-other-memo-group');
+                    if (memoGroup) memoGroup.style.display = 'none';
                 }
 
                 await updateDashboard();
@@ -664,14 +756,20 @@ document.addEventListener('DOMContentLoaded', () => {
         date: document.getElementById('train-date').value,
         type: document.getElementById('train-type').value,
         weight: parseFloat(document.getElementById('train-weight').value),
-        reps: parseInt(document.getElementById('train-reps').value),
-        sets: parseInt(document.getElementById('train-sets').value)
+        reps: isMedicineBallType(document.getElementById('train-type').value) ? 1 : parseInt(document.getElementById('train-reps').value),
+        sets: isMedicineBallType(document.getElementById('train-type').value) ? 1 : parseInt(document.getElementById('train-sets').value),
+        otherMemo: document.getElementById('train-type').value === 'その他'
+            ? document.getElementById('train-other-memo').value
+            : ''
     }), 'トレーニング記録を保存しました！');
 
     handleFormSubmit('stats-form', 'statsRecords', () => ({
         date: document.getElementById('stat-date').value,
         type: document.getElementById('stat-type').value,
-        value: parseFloat(document.getElementById('stat-val').value)
+        value: parseFloat(document.getElementById('stat-val').value),
+        otherMemo: document.getElementById('stat-type').value === 'その他'
+            ? document.getElementById('stat-other-memo').value
+            : ''
     }), '野球指標を保存しました！');
 
     // Add Record Button Animation
@@ -801,6 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- Player Management ----------
     const playerForm = document.getElementById('player-form');
     const playerListEl = document.getElementById('player-list');
+    const playerListSearch = document.getElementById('player-list-search');
 
     async function loadPlayers() {
         if (!window.fbGetPlayers) return [];
@@ -821,9 +920,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const role = localStorage.getItem('userRole');
         const currentUserId = localStorage.getItem('currentPlayerId');
         const currentUid = window.fbAuth?.currentUser?.uid;
+        const searchTerm = (playerListSearch?.value || '').trim().toLocaleLowerCase('ja-JP');
+        const visiblePlayers = searchTerm
+            ? players.filter(p => [p.name, p.grade, p.position, p.number]
+                .some(value => String(value || '').toLocaleLowerCase('ja-JP').includes(searchTerm)))
+            : players;
 
         // Show only non-master players in the player list, masters shown with badge
-        playerListEl.innerHTML = players.map(p => {
+        playerListEl.innerHTML = visiblePlayers.map(p => {
             const isOwner = p.id == currentUserId;
             const canEdit = role === 'master' || isOwner;
             const isMe = p.id === currentUid;
@@ -862,6 +966,8 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }).join('');
     }
+
+    playerListSearch?.addEventListener('input', () => renderPlayerList());
 
     // Event Delegation for Player List Actions (click)
     playerListEl.addEventListener('click', (e) => {
@@ -944,10 +1050,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- Player Authentication (Cloud ID Logic) ----------
     const playerAuthModal = document.getElementById('player-auth-modal');
     const authPlayerSelect = document.getElementById('auth-player-select');
+    const authPlayerSearch = document.getElementById('auth-player-search');
     const authLoginView = document.getElementById('auth-login-view');
     const authRegisterView = document.getElementById('auth-register-view');
     const authMasterView = document.getElementById('auth-master-view');
     const authMasterRegisterView = document.getElementById('auth-master-register-view');
+    let authPlayerOptions = [];
+
+    function renderAuthPlayerOptions(searchText = '') {
+        if (!authPlayerSelect) return;
+        const keyword = searchText.trim().toLocaleLowerCase('ja-JP');
+        const filteredPlayers = keyword
+            ? authPlayerOptions.filter(p => (p.name || '').toLocaleLowerCase('ja-JP').startsWith(keyword))
+            : authPlayerOptions;
+
+        let html = '<option value="">-- 選択してください --</option>';
+        filteredPlayers.forEach(p => {
+            const roleLabel = p.role === 'master' ? '管理者' : (p.position || '-');
+            html += `<option value="${p.id}">${p.name} (${roleLabel} / #${p.number || '-'})</option>`;
+        });
+
+        authPlayerSelect.innerHTML = html;
+    }
 
     async function showAuthModal() {
         console.log("showAuthModal() called");
@@ -980,17 +1104,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const uniquePlayers = Array.from(uniqueMap.values());
             uniquePlayers.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
-            let html = '<option value="">-- 選択してください --</option>';
-            uniquePlayers.forEach(p => {
-                const roleLabel = p.role === 'master' ? '管理者' : (p.position || '-');
-                html += `<option value="${p.id}">${p.name} (${roleLabel} / #${p.number || '-'})</option>`;
-            });
-            authPlayerSelect.innerHTML = html;
+            authPlayerOptions = uniquePlayers;
+            if (authPlayerSearch) authPlayerSearch.value = '';
+            renderAuthPlayerOptions();
         } catch (err) {
             console.error("showAuthModal failed to load players:", err);
             authPlayerSelect.innerHTML = '<option value="">選手リストの読み込みに失敗しました</option>';
         }
     }
+
+    authPlayerSearch?.addEventListener('input', (e) => {
+        renderAuthPlayerOptions(e.target.value);
+    });
 
     function applyThemeColor(colorName) {
         const root = document.documentElement;
@@ -1020,13 +1145,33 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (!profileName || !profileDetail || !profileAvatar) return;
 
+        const currentUserId = localStorage.getItem('currentPlayerId');
         if (role === 'master') {
-            profileName.textContent = 'マスター（管理者）';
-            profileDetail.textContent = '選手管理・全データ閲覧';
-            profileAvatar.src = 'https://api.dicebear.com/6.x/bottts/svg?seed=Master&backgroundColor=transparent';
-            applyThemeColor('orange');
+            let currentMaster = null;
+            if (currentUserId) {
+                const players = await loadPlayers();
+                currentMaster = players.find(p => p.id == currentUserId);
+            }
+
+            if (currentMaster) {
+                profileName.textContent = currentMaster.name || 'マスター（管理者）';
+                profileDetail.textContent = currentMaster.goal || currentMaster.position || '選手管理・全データ閲覧';
+
+                const style = currentMaster.avatarStyle || 'bottts';
+                const seed = currentMaster.avatarSeed || currentMaster.id || 'Master';
+                if (style === 'custom' && currentMaster.avatarDataUrl) {
+                    profileAvatar.src = currentMaster.avatarDataUrl;
+                } else {
+                    profileAvatar.src = `https://api.dicebear.com/6.x/${style === 'custom' ? 'bottts' : style}/svg?seed=${seed}&backgroundColor=transparent`;
+                }
+                applyThemeColor(currentMaster.themeColor || 'orange');
+            } else {
+                profileName.textContent = localStorage.getItem('masterName') || 'マスター（管理者）';
+                profileDetail.textContent = '選手管理・全データ閲覧';
+                profileAvatar.src = 'https://api.dicebear.com/6.x/bottts/svg?seed=Master&backgroundColor=transparent';
+                applyThemeColor('orange');
+            }
         } else {
-            const currentUserId = localStorage.getItem('currentPlayerId');
             if (currentUserId) {
                 const players = await loadPlayers();
                 const currentPlayer = players.find(p => p.id == currentUserId);
@@ -1554,6 +1699,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('hist-filter-training'),
         document.getElementById('hist-filter-stats')
     ];
+    const histSearchName = document.getElementById('hist-search-name');
+    const histSearchType = document.getElementById('hist-search-type');
+    const histExportCsvBtn = document.getElementById('hist-export-csv-btn');
     let currentHistType = 'weight';
 
     histFilters.forEach(btn => {
@@ -1568,6 +1716,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    histSearchName?.addEventListener('input', () => renderHistory());
+    histSearchType?.addEventListener('input', () => renderHistory());
+
     // Make functions globally available for inline onclick
     window.editRecord = async function(type, id) {
         let storeKey = type === 'weight' ? 'weightRecords' : (type === 'training' ? 'trainingRecords' : 'statsRecords');
@@ -1580,6 +1731,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let records = await window.fbGetRecords(storeKey, queryId);
         const rec = records.find(r => r.id == id);
         if (!rec) return;
+        if (role !== 'master' && rec.playerId !== currentUserId) {
+            alert('他のユーザーの履歴は編集できません。');
+            return;
+        }
 
         document.getElementById('edit-record-id').value = id;
         document.getElementById('edit-record-type').value = type;
@@ -1634,35 +1789,47 @@ document.addEventListener('DOMContentLoaded', () => {
                     <select id="edit-train-type" class="w-100" required>
                         <option value="スクワット" ${rec.type === 'スクワット' ? 'selected' : ''}>スクワット</option>
                         <option value="ベンチプレス" ${rec.type === 'ベンチプレス' ? 'selected' : ''}>ベンチプレス</option>
+                        <option value="ベンチプレス（ローテーションあり）" ${rec.type === 'ベンチプレス（ローテーションあり）' ? 'selected' : ''}>ベンチプレス（ローテーションあり）</option>
+                        <option value="ベンチプレス（ローテーションなし）" ${rec.type === 'ベンチプレス（ローテーションなし）' ? 'selected' : ''}>ベンチプレス（ローテーションなし）</option>
+                        <option value="ストレートバー" ${rec.type === 'ストレートバー' ? 'selected' : ''}>ストレートバー</option>
                         <option value="ボックスジャンプ" ${rec.type === 'ボックスジャンプ' ? 'selected' : ''}>ボックスジャンプ</option>
                         <option value="10m走" ${rec.type === '10m走' ? 'selected' : ''}>10m走</option>
+                        <option value="メディシンボールスロー2kg(前)" ${rec.type === 'メディシンボールスロー2kg(前)' ? 'selected' : ''}>メディシンボールスロー2kg(前)</option>
+                        <option value="メディシンボールスロー2kg(後ろ)" ${rec.type === 'メディシンボールスロー2kg(後ろ)' ? 'selected' : ''}>メディシンボールスロー2kg(後ろ)</option>
+                        <option value="メディシンボールスロー2kg(プッシュ)" ${rec.type === 'メディシンボールスロー2kg(プッシュ)' ? 'selected' : ''}>メディシンボールスロー2kg(プッシュ)</option>
+                        <option value="メディシンボールスロー2kg(サイド)" ${rec.type === 'メディシンボールスロー2kg(サイド)' ? 'selected' : ''}>メディシンボールスロー2kg(サイド)</option>
                         <option value="メディシンボールスロー(前)" ${rec.type === 'メディシンボールスロー(前)' ? 'selected' : ''}>メディシンボールスロー(前)</option>
                         <option value="メディシンボールスロー(後ろ)" ${rec.type === 'メディシンボールスロー(後ろ)' ? 'selected' : ''}>メディシンボールスロー(後ろ)</option>
                         <option value="メディシンボールスロー(プッシュ)" ${rec.type === 'メディシンボールスロー(プッシュ)' ? 'selected' : ''}>メディシンボールスロー(プッシュ)</option>
                         <option value="メディシンボールスロー(サイド)" ${rec.type === 'メディシンボールスロー(サイド)' ? 'selected' : ''}>メディシンボールスロー(サイド)</option>
                         <option value="立幅" ${rec.type === '立幅' ? 'selected' : ''}>立幅</option>
                         <option value="立ち三段" ${rec.type === '立ち三段' ? 'selected' : ''}>立ち三段</option>
-                        <option value="クリーン" ${rec.type === 'クリーン' ? 'selected' : ''}>クリーン</option>
                         <option value="ペンタゴンクリーン" ${rec.type === 'ペンタゴンクリーン' ? 'selected' : ''}>ペンタゴンクリーン</option>
                         <option value="フロントスクワット" ${rec.type === 'フロントスクワット' ? 'selected' : ''}>フロントスクワット</option>
+                        <option value="バックスクワット" ${rec.type === 'バックスクワット' ? 'selected' : ''}>バックスクワット</option>
                         <option value="デッドリフト" ${rec.type === 'デッドリフト' ? 'selected' : ''}>デッドリフト</option>
+                        <option value="懸垂" ${rec.type === '懸垂' ? 'selected' : ''}>懸垂</option>
                     </select>
                 </div>
                 <div class="form-group mb-3 row">
                     <div class="col">
-                        <label>重量 (kg)</label>
-                        <input type="number" step="0.5" id="edit-train-weight" value="${rec.weight}" class="w-100" required>
+                        <label id="edit-train-value-label">${getTrainingValueLabel(rec.type)}</label>
+                        <input type="number" step="0.01" id="edit-train-weight" value="${rec.weight}" class="w-100" required>
                     </div>
-                    <div class="col">
+                    <div class="col" id="edit-train-reps-col">
                         <label>回数</label>
                         <input type="number" id="edit-train-reps" value="${rec.reps}" class="w-100" required>
                     </div>
-                    <div class="col">
+                    <div class="col" id="edit-train-sets-col">
                         <label>セット</label>
                         <input type="number" id="edit-train-sets" value="${rec.sets}" class="w-100" required>
                     </div>
                 </div>
             `;
+            setTimeout(() => {
+                updateEditTrainingInputMode(rec.type);
+                document.getElementById('edit-train-type')?.addEventListener('change', (e) => updateEditTrainingInputMode(e.target.value));
+            }, 0);
         } else if (type === 'stats') {
             container.innerHTML += `
                 <div class="form-group mb-3">
@@ -1699,6 +1866,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const id = document.getElementById('edit-record-id').value;
         const type = document.getElementById('edit-record-type').value;
         let storeKey = type === 'weight' ? 'weightRecords' : (type === 'training' ? 'trainingRecords' : 'statsRecords');
+        const role = localStorage.getItem('userRole') || 'player';
+        const currentUserId = localStorage.getItem('currentPlayerId');
+
+        if (role !== 'master') {
+            const records = await window.fbGetRecords(storeKey, currentUserId);
+            const targetRecord = records.find(r => r.id == id);
+            if (!targetRecord || targetRecord.playerId !== currentUserId) {
+                alert('他のユーザーの履歴は更新できません。');
+                return;
+            }
+        }
         
         const updatedData = {};
         
@@ -1718,8 +1896,8 @@ document.addEventListener('DOMContentLoaded', () => {
             updatedData.date = document.getElementById('edit-train-date').value;
             updatedData.type = document.getElementById('edit-train-type').value;
             updatedData.weight = parseFloat(document.getElementById('edit-train-weight').value);
-            updatedData.reps = parseInt(document.getElementById('edit-train-reps').value);
-            updatedData.sets = parseInt(document.getElementById('edit-train-sets').value);
+            updatedData.reps = isMedicineBallType(updatedData.type) ? 1 : parseInt(document.getElementById('edit-train-reps').value);
+            updatedData.sets = isMedicineBallType(updatedData.type) ? 1 : parseInt(document.getElementById('edit-train-sets').value);
         } else if (type === 'stats') {
             updatedData.date = document.getElementById('edit-stat-date').value;
             updatedData.type = document.getElementById('edit-stat-type').value;
@@ -1738,6 +1916,16 @@ document.addEventListener('DOMContentLoaded', () => {
     window.deleteRecord = async function(type, id) {
         if (!confirm('この記録を削除しますか？')) return;
         let storeKey = type === 'weight' ? 'weightRecords' : (type === 'training' ? 'trainingRecords' : 'statsRecords');
+        const role = localStorage.getItem('userRole') || 'player';
+        const currentUserId = localStorage.getItem('currentPlayerId');
+        if (role !== 'master') {
+            const records = await window.fbGetRecords(storeKey, currentUserId);
+            const targetRecord = records.find(r => r.id == id);
+            if (!targetRecord || targetRecord.playerId !== currentUserId) {
+                alert('他のユーザーの履歴は削除できません。');
+                return;
+            }
+        }
         
         await window.fbDeleteRecord(storeKey, id);
         
@@ -1745,30 +1933,116 @@ document.addEventListener('DOMContentLoaded', () => {
         await updateDashboard();
     };
 
+    function toDateKey(value) {
+        if (!value) return '';
+        return String(value).slice(0, 10);
+    }
+
+    async function buildCommentLandmarkSet(records, role, currentUserId) {
+        const playerIds = [...new Set(records.map(r => r.playerId).filter(Boolean))];
+        if (role !== 'master' && currentUserId) {
+            playerIds.splice(0, playerIds.length, currentUserId);
+        }
+
+        const landmarkSet = new Set();
+        await Promise.all(playerIds.map(async (playerId) => {
+            try {
+                const comments = await window.fbGetComments(playerId);
+                comments.forEach(comment => {
+                    const dateKey = toDateKey(comment.date);
+                    if (dateKey) landmarkSet.add(`${playerId}|${dateKey}`);
+                });
+            } catch (err) {
+                console.warn('Failed to load comments for history landmarks:', err);
+            }
+        }));
+        return landmarkSet;
+    }
+
+    function getHistoryRecordTypeText(record, histType) {
+        if (histType === 'weight') return '体組成';
+        return record.type || '';
+    }
+
+    function getHistoryRecordDisplay(record, histType) {
+        if (histType === 'weight') {
+            return {
+                dataType: '体重',
+                item: '体組成',
+                value1: record.weight,
+                value2: record.bodyFat || '',
+                value3: '',
+                memo: record.memo || '',
+                label: `${record.date} - 体重: ${record.weight}kg${record.bodyFat ? ` / 体脂肪: ${record.bodyFat}%` : ''}`
+            };
+        }
+        if (histType === 'training') {
+            const unit = getTrainingValueUnit(record.type);
+            return {
+                dataType: 'トレーニング',
+                item: record.type,
+                value1: `${record.weight}${unit}`,
+                value2: isMedicineBallType(record.type) ? '' : record.reps,
+                value3: isMedicineBallType(record.type) ? '' : record.sets,
+                memo: record.otherMemo || '',
+                label: formatTrainingRecordLabel(record)
+            };
+        }
+        return {
+            dataType: '野球指標',
+            item: record.type,
+            value1: record.value,
+            value2: '',
+            value3: '',
+            memo: record.otherMemo || '',
+            label: `${record.date} - ${record.type}: ${record.value}`
+        };
+    }
+
+    function filterHistoryRecords(records, players, histType) {
+        const nameTerm = (histSearchName?.value || '').trim().toLocaleLowerCase('ja-JP');
+        const typeTerm = (histSearchType?.value || '').trim().toLocaleLowerCase('ja-JP');
+
+        return records.filter(record => {
+            const player = players.find(p => p.id === record.playerId);
+            const playerName = (player?.name || '').toLocaleLowerCase('ja-JP');
+            const typeText = getHistoryRecordTypeText(record, histType).toLocaleLowerCase('ja-JP');
+            return (!nameTerm || playerName.includes(nameTerm)) &&
+                (!typeTerm || typeText.includes(typeTerm));
+        });
+    }
+
+    async function getCurrentHistoryDataset() {
+        const role = localStorage.getItem('userRole') || 'player';
+        const currentUserId = localStorage.getItem('currentPlayerId');
+        
+        if (role === 'player' && !currentUserId) {
+            return { records: [], players: [], role, currentUserId, needsLogin: true };
+        }
+
+        let storeKey = currentHistType === 'weight' ? 'weightRecords' : (currentHistType === 'training' ? 'trainingRecords' : 'statsRecords');
+        const queryId = role === 'master' ? null : currentUserId;
+        let records = await window.fbGetRecords(storeKey, queryId);
+        if (role !== 'master') {
+            records = records.filter(r => r.playerId === currentUserId);
+        }
+        const players = await loadPlayers();
+        records = filterHistoryRecords(records, players, currentHistType);
+        records.sort((a, b) => new Date(b.date) - new Date(a.date));
+        return { records, players, role, currentUserId, needsLogin: false };
+    }
+
     async function renderHistory() {
         const listEl = document.getElementById('history-list');
         if (!listEl) return;
         listEl.innerHTML = '';
 
-        const role = localStorage.getItem('userRole') || 'player';
-        const currentUserId = localStorage.getItem('currentPlayerId');
-        
-        if (role === 'player' && !currentUserId) {
+        const { records, players, role, currentUserId, needsLogin } = await getCurrentHistoryDataset();
+        if (needsLogin) {
             listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary);">選手を選択してください</p>';
             return;
         }
-
-        let storeKey = currentHistType === 'weight' ? 'weightRecords' : (currentHistType === 'training' ? 'trainingRecords' : 'statsRecords');
-        
-        // Pass null if master to fetch all records
-        const queryId = role === 'master' ? null : currentUserId;
-        let records = await window.fbGetRecords(storeKey, queryId);
-        
-        // Pre-load players to map names
-        const players = await loadPlayers();
-        
-        // Sort descending by date
-        records.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const commentLandmarks = await buildCommentLandmarkSet(records, role, currentUserId);
 
         if (records.length === 0) {
             listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary);">記録がありません</p>';
@@ -1782,21 +2056,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const li = document.createElement('li');
             li.className = 'player-item';
             
-            let label = '';
-            if (currentHistType === 'weight') {
-                label = `${r.date} - 体重: ${r.weight}kg${r.bodyFat ? ` / 体脂肪: ${r.bodyFat}%` : ''}`;
-            } else if (currentHistType === 'training') {
-                label = `${r.date} - ${r.type}: ${r.weight}kg x ${r.reps}回 x ${r.sets}セット`;
-            } else if (currentHistType === 'stats') {
-                label = `${r.date} - ${r.type}: ${r.value}`;
-            }
+            const display = getHistoryRecordDisplay(r, currentHistType);
+            let label = display.label;
             
             if (role === 'master') {
                 label = `【${playerNameText}】 ` + label;
             }
+            const hasComment = commentLandmarks.has(`${r.playerId}|${toDateKey(r.date)}`);
+            const commentLandmark = hasComment
+                ? '<span title="この日のコメントあり" style="color:var(--accent-orange); margin-right:8px;"><i class="fa-solid fa-location-dot"></i></span>'
+                : '';
 
             li.innerHTML = `
-                <span>${label}</span>
+                <span>${commentLandmark}${label}</span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn-outline" onclick="editRecord('${currentHistType}', '${r.id}')">
                         <i class="fa-solid fa-pen"></i> 編集
@@ -1809,6 +2081,42 @@ document.addEventListener('DOMContentLoaded', () => {
             listEl.appendChild(li);
         });
     }
+
+    histExportCsvBtn?.addEventListener('click', async () => {
+        try {
+            const { records, players, needsLogin } = await getCurrentHistoryDataset();
+            if (needsLogin) {
+                alert('ログインしてからご利用ください。');
+                return;
+            }
+            if (records.length === 0) {
+                alert('出力対象の履歴がありません。');
+                return;
+            }
+
+            const playerMap = {};
+            players.forEach(p => playerMap[p.id] = p.name);
+            let csvContent = 'データタイプ,名前,日付,種目/項目,値1(体重/重量/記録),値2(体脂肪/回数),値3(セット数),メモ\n';
+            records.forEach(record => {
+                const display = getHistoryRecordDisplay(record, currentHistType);
+                const name = playerMap[record.playerId] || '不明';
+                csvContent += `${display.dataType},${name},${record.date},${display.item},${display.value1},${display.value2},${display.value3},"${String(display.memo).replace(/"/g, '""')}"\n`;
+            });
+
+            const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `history_${currentHistType}_${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('History CSV Export Failed:', err);
+            alert('履歴CSV出力に失敗しました。');
+        }
+    });
 
     let globalUnreadListener = null;
     function initChatNotifications() {
@@ -1902,12 +2210,74 @@ document.addEventListener('DOMContentLoaded', () => {
         rankingCategorySelect.addEventListener('change', () => window.updateRanking());
     }
 
+    function collectSelectValues(selectId) {
+        const select = document.getElementById(selectId);
+        if (!select) return [];
+        return Array.from(select.options)
+            .map(option => option.value || option.textContent.trim())
+            .filter(value => value && value !== 'その他' && !value.includes('選択'));
+    }
+
+    function getRankingSort(typeName) {
+        return /秒|走/.test(typeName) ? 'asc' : 'desc';
+    }
+
+    function isRankableType(typeName) {
+        return Boolean(typeName) && typeName !== 'その他' && !String(typeName).includes('選択');
+    }
+
+    function buildRankingCategories(stats, trainings) {
+        const statTypes = new Set([
+            ...collectSelectValues('stat-type'),
+            ...collectSelectValues('stats-chart-type'),
+            ...stats.map(r => r.type).filter(isRankableType)
+        ]);
+        const trainingTypes = new Set([
+            ...collectSelectValues('train-type'),
+            ...collectSelectValues('training-chart-type'),
+            ...trainings.map(r => r.type).filter(isRankableType)
+        ]);
+
+        const categories = [];
+        statTypes.forEach(typeName => {
+            categories.push({
+                id: `stats:${typeName}`,
+                title: `野球指標: ${typeName}`,
+                type: 'stats',
+                target: typeName,
+                sort: getRankingSort(typeName)
+            });
+        });
+        trainingTypes.forEach(typeName => {
+            categories.push({
+                id: `training:${typeName}`,
+                title: `ウエイト: ${typeName}`,
+                type: 'training',
+                target: typeName,
+                sort: getRankingSort(typeName)
+            });
+        });
+        return categories;
+    }
+
+    function syncRankingCategoryOptions(categories, selectedCatId) {
+        if (!rankingCategorySelect) return categories[0]?.id || '';
+        const nextSelected = categories.some(cat => cat.id === selectedCatId)
+            ? selectedCatId
+            : categories[0]?.id || '';
+
+        rankingCategorySelect.innerHTML = categories.map(cat => (
+            `<option value="${cat.id}" ${cat.id === nextSelected ? 'selected' : ''}>${cat.title}</option>`
+        )).join('');
+        return nextSelected;
+    }
+
     window.updateRanking = async function() {
         const view = document.getElementById('ranking-single-view');
         if (!view) return;
         
         const period = rankingPeriodSelect ? rankingPeriodSelect.value : 'all';
-        const selectedCatId = rankingCategorySelect ? rankingCategorySelect.value : 'pitch';
+        const selectedCatId = rankingCategorySelect ? rankingCategorySelect.value : '';
         const now = new Date();
         const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
         const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
@@ -1925,24 +2295,15 @@ document.addEventListener('DOMContentLoaded', () => {
         view.innerHTML = '<div style="text-align:center; width:100%; opacity:0.5; padding: 40px;">ランキングを集計中...</div>';
 
         const players = await loadPlayers();
-        const role = localStorage.getItem('userRole') || 'player';
-        const currentPlayerId = localStorage.getItem('currentPlayerId');
-        const stats = await window.fbGetRecords('statsRecords', role === 'master' ? null : currentPlayerId);
-        const trainings = await window.fbGetRecords('trainingRecords', role === 'master' ? null : currentPlayerId);
+        const stats = await window.fbGetRecords('statsRecords', null);
+        const trainings = await window.fbGetRecords('trainingRecords', null);
         
         const playerMap = {};
         players.forEach(p => playerMap[p.id] = p);
 
-        const categories = {
-            'pitch': { title: '⚾ 球速 (km/h)', type: 'stats', target: '球速 (km/h)', sort: 'desc' },
-            'swing': { title: '🏏 スイングスピード (km/h)', type: 'stats', target: 'スイングスピード (km/h)', sort: 'desc' },
-            'longtoss': { title: '🚀 遠投 (m)', type: 'stats', target: '遠投 (m)', sort: 'desc' },
-            'dash50': { title: '🏃‍♂️ 50m走 (秒)', type: 'stats', target: '50m走 (秒)', sort: 'asc' },
-            'bench': { title: '💪 ベンチプレス (kg)', type: 'training', target: 'ベンチプレス', sort: 'desc' },
-            'squat': { title: '🦵 スクワット (kg)', type: 'training', target: 'スクワット', sort: 'desc' }
-        };
-
-        const cat = categories[selectedCatId];
+        const categories = buildRankingCategories(stats, trainings);
+        const activeCatId = syncRankingCategoryOptions(categories, selectedCatId);
+        const cat = categories.find(c => c.id === activeCatId);
         if (!cat) return;
 
         const bests = []; 
@@ -1952,7 +2313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cat.type === 'stats') {
                 pRecords = stats.filter(r => r.playerId === p.id && r.type === cat.target && isInPeriod(r.date));
             } else {
-                pRecords = trainings.filter(r => r.playerId === p.id && r.type === cat.target && isInPeriod(r.date) && Number(r.reps) >= 10);
+                pRecords = trainings.filter(r => r.playerId === p.id && r.type === cat.target && isInPeriod(r.date));
             }
 
             if (pRecords.length > 0) {
@@ -1967,13 +2328,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         bests.sort((a, b) => cat.sort === 'desc' ? b.val - a.val : a.val - b.val);
-        const top10 = bests.slice(0, 10); // TOP 10 displays fully
 
         let listHtml = '';
-        if (top10.length === 0) {
+        if (bests.length === 0) {
             listHtml = '<div style="padding:40px 16px; text-align:center; color:var(--text-secondary); font-size:1rem;">該当する記録がありません</div>';
         } else {
-            top10.forEach((item, index) => {
+            bests.forEach((item, index) => {
                 const p = playerMap[item.playerId] || { name: '不明' };
                 let rankIcon = `<span style="display:inline-block; width:36px; text-align:center; font-weight:bold; color:var(--text-secondary); font-size: 1.1rem;">${index + 1}</span>`;
                 if (index === 0) rankIcon = `<i class="fa-solid fa-medal" style="color: gold; font-size:1.5rem; width:36px; text-align:center;"></i>`;
@@ -1997,8 +2357,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                         <div style="text-align:right;">
-                            <div style="font-weight:bold; color:var(--accent-orange); font-size:1.5rem; letter-spacing: -0.5px;">${item.val}</div>
-                            <div style="font-size:0.8rem; color:var(--text-secondary);">${item.date}</div>
+                            <div style="font-weight:bold; color:var(--accent-orange); font-size:1.5rem; letter-spacing: -0.5px;">${item.val}${cat.type === 'training' ? getTrainingValueUnit(cat.target) : ''}</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">${item.date}${cat.sort === 'asc' ? ' / 低いほど上位' : ''}</div>
                         </div>
                     </div>
                 `;
@@ -2008,7 +2368,7 @@ document.addEventListener('DOMContentLoaded', () => {
         view.innerHTML = `
             <div class="glass" style="border-radius:var(--border-radius); overflow:hidden; background:rgba(255,255,255,0.03);">
                 <div style="padding: 16px; border-bottom: 2px solid var(--border-glass); font-weight: bold; font-size: 1.2rem; color: var(--text-primary); text-align:center;">
-                    ${cat.title} <span style="font-size: 0.9rem; color: var(--text-secondary); font-weight: normal; margin-left:8px;">TOP 10</span>
+                    ${cat.title} <span style="font-size: 0.9rem; color: var(--text-secondary); font-weight: normal; margin-left:8px;">全順位</span>
                 </div>
                 <div>${listHtml}</div>
             </div>
@@ -2043,7 +2403,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Format Training
                 trainings.forEach(t => {
                     const name = playerMap[t.playerId] || '不明';
-                    csvContent += `トレーニング,${name},${t.date},${t.type},${t.weight},${t.reps},${t.sets},\n`;
+                    const unit = getTrainingValueUnit(t.type);
+                    const reps = isMedicineBallType(t.type) ? '' : t.reps;
+                    const sets = isMedicineBallType(t.type) ? '' : t.sets;
+                    csvContent += `トレーニング,${name},${t.date},${t.type},${t.weight}${unit},${reps},${sets},\n`;
                 });
                 
                 // Format Stats
@@ -2077,10 +2440,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const role = localStorage.getItem('userRole');
         const currentUserId = localStorage.getItem('currentPlayerId');
         
-        if (role === 'master') {
-            alert('マスター権限の高度な設定は現在準備中です。');
-            return;
-        }
         if (!currentUserId) {
             alert('ログインしてからご利用ください。');
             return;
@@ -2092,19 +2451,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Populate Form
         document.getElementById('settings-name').value = currentPlayer.name || '';
-        document.getElementById('settings-grade').value = currentPlayer.grade || '大1';
+        document.getElementById('settings-grade').value = currentPlayer.grade || (role === 'master' ? 'スタッフ/その他' : '大1');
         document.getElementById('settings-position').value = currentPlayer.position || '';
         document.getElementById('settings-number').value = currentPlayer.number || '';
         document.getElementById('settings-goal').value = currentPlayer.goal || '';
         
-        document.getElementById('settings-avatar-style').value = currentPlayer.avatarStyle || 'avataaars';
+        document.getElementById('settings-avatar-style').value = currentPlayer.avatarStyle || (role === 'master' ? 'bottts' : 'avataaars');
         document.getElementById('settings-avatar-seed').value = currentPlayer.avatarSeed || currentPlayer.id;
         pendingAvatarDataUrl = currentPlayer.avatarDataUrl || null;
         
         updateAvatarPreview();
 
         // Theme Colors
-        const currentTheme = currentPlayer.themeColor || 'blue';
+        const currentTheme = currentPlayer.themeColor || (role === 'master' ? 'orange' : 'blue');
         document.querySelectorAll('.theme-color-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.color === currentTheme);
         });
@@ -2218,6 +2577,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await window.fbUpdatePlayer(currentUserId, updatedData);
+            if ((localStorage.getItem('userRole') || 'player') === 'master') {
+                localStorage.setItem('masterName', updatedData.name || 'マスター');
+            }
             const msg = document.getElementById('settings-profile-msg');
             msg.style.display = 'block';
             setTimeout(() => msg.style.display = 'none', 3000);
