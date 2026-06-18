@@ -162,6 +162,16 @@ window.fbDeleteRecord = async function(collectionName, id) {
   await db.collection(collectionName).doc(id).delete();
 }
 
+// App Settings
+window.fbGetAppSetting = async function(settingId) {
+  const doc = await db.collection("appSettings").doc(settingId).get();
+  return doc.exists ? doc.data() : null;
+}
+
+window.fbSetAppSetting = async function(settingId, data) {
+  await db.collection("appSettings").doc(settingId).set(data, { merge: true });
+}
+
 // ----- Comments Functions -----
 window.fbAddComment = async function(playerId, senderName, senderId, content) {
     const data = {

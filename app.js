@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
             WEEKLY: 'weekly',
             MONTHLY: 'monthly'
         },
+        DASHBOARD_PERIODS: {
+            ONE_WEEK: '1week',
+            ONE_MONTH: '1month',
+            THREE_MONTHS: '3months',
+            SIX_MONTHS: '6months',
+            ALL: 'all'
+        },
         CHART_COLORS: {
             WEIGHT: '#3b82f6',
             BODY_FAT: '#f97316',
@@ -17,6 +24,55 @@ document.addEventListener('DOMContentLoaded', () => {
             RATIO: '#8b5cf6'
         }
     };
+
+    const DASHBOARD_DEFINITIONS = {
+        graphs: [
+            { id: 'weight', label: '体重推移' },
+            { id: 'bodyfat', label: '体脂肪率推移' },
+            { id: 'training', label: '筋トレ推移' },
+            { id: 'stats', label: '野球指標' },
+            { id: 'ratio', label: '単位仕事量推移' }
+        ],
+        defaults: {
+            graph: 'weight',
+            trainingType: 'スクワット',
+            statType: '球速 (km/h)',
+            period: '3months'
+        }
+    };
+    window.DASHBOARD_DEFINITIONS = DASHBOARD_DEFINITIONS;
+
+    const ABILITY_CONFIG = {
+        targetLineScore: 80,
+        attributes: [
+            { key: 'burst', label: '瞬発' },
+            { key: 'power', label: '出力' },
+            { key: 'strength', label: '筋力' },
+            { key: 'flexibility', label: '柔軟性' }
+        ],
+        rules: [
+            { source: 'training', pattern: /10m走/, attribute: 'burst', target80: 1.8, direction: 'lower', unit: '秒' },
+            { source: 'training', pattern: /30m走/, attribute: 'burst', target80: 4.2, direction: 'lower', unit: '秒' },
+            { source: 'training', pattern: /50m走/, attribute: 'burst', target80: 6.5, direction: 'lower', unit: '秒' },
+            { source: 'training', pattern: /ボックスジャンプ/, attribute: 'burst', target80: 70, direction: 'higher', unit: 'cm' },
+            { source: 'training', pattern: /立幅/, attribute: 'burst', target80: 260, direction: 'higher', unit: 'cm' },
+            { source: 'training', pattern: /立ち三段/, attribute: 'burst', target80: 780, direction: 'higher', unit: 'cm' },
+            { source: 'training', pattern: /メディシンボール|スロー/, attribute: 'power', target80: 10, direction: 'higher', unit: 'm' },
+            { source: 'training', pattern: /ペンタゴンクリーン|クリーン/, attribute: 'power', target80: 90, direction: 'higher', unit: 'kg' },
+            { source: 'training', pattern: /スクワット|プレス|ストレートバー|デッドリフト|懸垂/, attribute: 'strength', target80: 120, direction: 'higher', unit: 'kg' },
+            { source: 'stats', pattern: /球速|プルダウン/, attribute: 'power', target80: 140, direction: 'higher', unit: 'km/h' },
+            { source: 'stats', pattern: /スイングスピード/, attribute: 'power', target80: 130, direction: 'higher', unit: 'km/h' },
+            { source: 'stats', pattern: /10m走/, attribute: 'burst', target80: 1.8, direction: 'lower', unit: '秒' },
+            { source: 'stats', pattern: /30m走/, attribute: 'burst', target80: 4.2, direction: 'lower', unit: '秒' },
+            { source: 'stats', pattern: /50m走/, attribute: 'burst', target80: 6.5, direction: 'lower', unit: '秒' },
+            { source: 'stats', pattern: /柔軟|可動域|肩|股関節|前屈/, attribute: 'flexibility', target80: 80, direction: 'higher', unit: '点' }
+        ],
+        fallback: {
+            training: { attribute: 'strength', target80: 100, direction: 'higher', unit: 'kg' },
+            stats: { attribute: 'power', target80: 140, direction: 'higher', unit: '' }
+        }
+    };
+    window.ABILITY_CONFIG = ABILITY_CONFIG;
 
     // ---------- Global Helpers ----------
     /**
@@ -87,6 +143,509 @@ document.addEventListener('DOMContentLoaded', () => {
     const viewportMeta = document.getElementById('viewport-meta');
     const viewToggleBtn = document.getElementById('view-toggle-btn');
     let isDesktopView = localStorage.getItem('forceDesktopView') === 'true';
+    let dashboardLastData = null;
+    let dashboardLastFilters = null;
+    let dashboardWeeklyStatusCache = [];
+    let itemDefinitionsState = null;
+    let itemDefinitionFallbackCache = null;
+    let currentItemSettingsKind = 'training';
+
+    function populateDashboardSelect(selectId, options) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const currentValue = select.value;
+        select.innerHTML = options
+            .map(option => `<option value="${option.value}">${option.label}</option>`)
+            .join('');
+        if (options.some(option => option.value === currentValue)) {
+            select.value = currentValue;
+        }
+    }
+
+    function getOptionsFromSelect(selectId) {
+        const source = document.getElementById(selectId);
+        if (!source) return [];
+        return Array.from(source.options)
+            .map(option => ({
+                value: option.value || option.textContent.trim(),
+                label: option.textContent.trim()
+            }))
+            .filter(option => (
+                option.value &&
+                option.value !== 'その他' &&
+                !option.value.includes('選択') &&
+                !option.label.includes('選択')
+            ));
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    function cloneDefinitions(definitions) {
+        return {
+            training: (definitions?.training || []).map(item => ({ ...item })),
+            stats: (definitions?.stats || []).map(item => ({ ...item }))
+        };
+    }
+
+    function createItemId(source, name) {
+        const normalized = String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w\u3040-\u30ff\u3400-\u9fff-]/g, '');
+        return `${source}:${normalized || Date.now()}`;
+    }
+
+    function normalizeItemDefinition(source, item, index = 0) {
+        const name = String(item?.name || item?.label || item?.value || '').trim();
+        const rule = getAbilityRule(source, name);
+        const unit = item?.unit ?? getAbilityUnit(source, name, rule);
+        return {
+            id: item?.id || createItemId(source, name),
+            source,
+            name,
+            label: String(item?.label || name).trim(),
+            attribute: item?.attribute || rule.attribute || 'power',
+            target80: Number(item?.target80 ?? rule.target80 ?? 80),
+            score80: Number(item?.score80 ?? rule.score80 ?? ABILITY_CONFIG.targetLineScore),
+            direction: item?.direction || rule.direction || 'higher',
+            unit: unit || '',
+            active: item?.active !== false,
+            sortOrder: Number(item?.sortOrder ?? index)
+        };
+    }
+
+    function getDefaultItemDefinitions() {
+        if (itemDefinitionFallbackCache) return cloneDefinitions(itemDefinitionFallbackCache);
+
+        itemDefinitionFallbackCache = {
+            training: getOptionsFromSelect('train-type')
+                .map((option, index) => normalizeItemDefinition('training', {
+                    id: createItemId('training', option.value),
+                    name: option.value,
+                    label: option.label,
+                    sortOrder: index
+                }, index)),
+            stats: getOptionsFromSelect('stat-type')
+                .map((option, index) => normalizeItemDefinition('stats', {
+                    id: createItemId('stats', option.value),
+                    name: option.value,
+                    label: option.label,
+                    sortOrder: index
+                }, index))
+        };
+
+        return cloneDefinitions(itemDefinitionFallbackCache);
+    }
+
+    function getItemDefinitions() {
+        if (!itemDefinitionsState) {
+            itemDefinitionsState = getDefaultItemDefinitions();
+        }
+        return itemDefinitionsState;
+    }
+
+    function getActiveItemDefinitions(source) {
+        return (getItemDefinitions()[source] || [])
+            .filter(item => item.active !== false && item.name)
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    }
+
+    function getItemDefinition(source, typeName) {
+        return (getItemDefinitions()[source] || []).find(item => item.name === typeName);
+    }
+
+    function getDefinitionOptions(source) {
+        return getActiveItemDefinitions(source).map(item => ({
+            value: item.name,
+            label: item.label || item.name
+        }));
+    }
+
+    function populateManagedSelect(selectId, source, options = {}) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+
+        const currentValue = options.selected ?? select.value;
+        select.innerHTML = '';
+        if (options.placeholder) {
+            select.appendChild(new Option(options.placeholder, ''));
+        }
+
+        getActiveItemDefinitions(source).forEach(item => {
+            select.appendChild(new Option(item.label || item.name, item.name));
+        });
+
+        if (options.includeOther) {
+            select.appendChild(new Option('その他', 'その他'));
+        }
+
+        const values = Array.from(select.options).map(option => option.value);
+        if (values.includes(currentValue)) {
+            select.value = currentValue;
+        } else if (!options.placeholder && select.options.length > 0) {
+            select.selectedIndex = 0;
+        }
+    }
+
+    function buildItemTypeOptions(source, selectedValue) {
+        const definitions = getActiveItemDefinitions(source);
+        const options = definitions.map(item => ({
+            value: item.name,
+            label: item.label || item.name
+        }));
+
+        if (selectedValue && !options.some(option => option.value === selectedValue)) {
+            options.push({ value: selectedValue, label: selectedValue });
+        }
+
+        return options.map(option => (
+            `<option value="${escapeHtml(option.value)}" ${option.value === selectedValue ? 'selected' : ''}>${escapeHtml(option.label)}</option>`
+        )).join('');
+    }
+
+    function applyItemDefinitions(definitions = getItemDefinitions()) {
+        itemDefinitionsState = cloneDefinitions(definitions);
+        populateManagedSelect('train-type', 'training', { placeholder: '種目を選択...', includeOther: true });
+        populateManagedSelect('stat-type', 'stats', { placeholder: '項目を選択...', includeOther: true });
+        populateManagedSelect('training-chart-type', 'training');
+        populateManagedSelect('stats-chart-type', 'stats');
+
+        DASHBOARD_DEFINITIONS.trainingTypes = getDefinitionOptions('training');
+        DASHBOARD_DEFINITIONS.statTypes = getDefinitionOptions('stats');
+        populateDashboardHistorySelect(DASHBOARD_DEFINITIONS.trainingTypes, DASHBOARD_DEFINITIONS.statTypes);
+        updateTrainingInputMode(document.getElementById('train-type')?.value || '');
+    }
+
+    function populateDashboardHistorySelect(trainingTypes, statTypes) {
+        const select = document.getElementById('dashboard-history-type');
+        if (!select) return;
+
+        const currentValue = select.value;
+        const sections = [
+            {
+                label: '身体',
+                options: [
+                    { value: 'weight', label: '体重' },
+                    { value: 'bodyfat', label: '体脂肪率' }
+                ]
+            },
+            {
+                label: 'ウエイトトレーニング',
+                options: trainingTypes.map(option => ({
+                    value: `training:${option.value}`,
+                    label: option.label
+                }))
+            },
+            {
+                label: '単位仕事量',
+                options: trainingTypes.map(option => ({
+                    value: `ratio:${option.value}`,
+                    label: option.label
+                }))
+            },
+            {
+                label: '野球指標',
+                options: statTypes.map(option => ({
+                    value: `stats:${option.value}`,
+                    label: option.label
+                }))
+            }
+        ];
+
+        select.innerHTML = '';
+        sections
+            .filter(section => section.options.length > 0)
+            .forEach(section => {
+                const group = document.createElement('optgroup');
+                group.label = section.label;
+                section.options.forEach(option => {
+                    group.appendChild(new Option(option.label, option.value));
+                });
+                select.appendChild(group);
+            });
+
+        const availableValues = Array.from(select.options).map(option => option.value);
+        select.value = availableValues.includes(currentValue) ? currentValue : 'weight';
+    }
+
+    function initDashboardDefinitions() {
+        applyItemDefinitions();
+        DASHBOARD_DEFINITIONS.graphs.forEach(graph => {
+            const tab = document.querySelector(`.graph-tab[data-graph="${graph.id}"]`);
+            if (tab) tab.textContent = graph.label;
+        });
+    }
+
+    async function loadItemSettings() {
+        const defaults = getDefaultItemDefinitions();
+        try {
+            const saved = await window.fbGetAppSetting?.('itemDefinitions');
+            const merged = {
+                training: (saved?.training?.length ? saved.training : defaults.training)
+                    .map((item, index) => normalizeItemDefinition('training', item, index)),
+                stats: (saved?.stats?.length ? saved.stats : defaults.stats)
+                    .map((item, index) => normalizeItemDefinition('stats', item, index))
+            };
+            applyItemDefinitions(merged);
+            const status = document.getElementById('item-settings-status');
+            if (status) status.textContent = saved ? '同期済み' : '初期設定';
+            renderItemSettings();
+        } catch (err) {
+            console.warn('Failed to load item settings:', err);
+            applyItemDefinitions(defaults);
+        }
+    }
+
+    async function saveItemSettings() {
+        const status = document.getElementById('item-settings-status');
+        if (status) status.textContent = '保存中...';
+        const payload = {
+            ...cloneDefinitions(getItemDefinitions()),
+            updatedAt: new Date().toISOString()
+        };
+        await window.fbSetAppSetting('itemDefinitions', payload);
+        if (status) status.textContent = '保存済み';
+    }
+
+    function getAttributeLabel(attributeKey) {
+        return ABILITY_CONFIG.attributes.find(attribute => attribute.key === attributeKey)?.label || attributeKey;
+    }
+
+    function getCurrentItemList() {
+        return getItemDefinitions()[currentItemSettingsKind] || [];
+    }
+
+    function setCurrentItemList(nextList) {
+        itemDefinitionsState = {
+            ...cloneDefinitions(getItemDefinitions()),
+            [currentItemSettingsKind]: nextList.map((item, index) => ({
+                ...item,
+                sortOrder: index
+            }))
+        };
+    }
+
+    function fillItemSettingForm(item = null) {
+        const source = currentItemSettingsKind;
+        const fallback = normalizeItemDefinition(source, {
+            name: '',
+            attribute: source === 'training' ? 'strength' : 'power',
+            target80: source === 'stats' ? 140 : 100,
+            score80: ABILITY_CONFIG.targetLineScore,
+            direction: 'higher',
+            unit: source === 'training' ? 'kg' : ''
+        });
+
+        const next = item || fallback;
+        const setValue = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value ?? '';
+        };
+
+        setValue('item-setting-id', item?.id || '');
+        setValue('item-setting-name', item?.name || '');
+        setValue('item-setting-attribute', next.attribute);
+        setValue('item-setting-direction', next.direction);
+        setValue('item-setting-target80', next.target80);
+        setValue('item-setting-score80', next.score80);
+        setValue('item-setting-unit', next.unit);
+
+        const active = document.getElementById('item-setting-active');
+        if (active) active.checked = next.active !== false;
+        const deleteBtn = document.getElementById('item-settings-delete-btn');
+        if (deleteBtn) deleteBtn.disabled = !item;
+    }
+
+    function renderItemSettings() {
+        const role = localStorage.getItem('userRole') || 'player';
+        const panel = document.getElementById('item-settings');
+        if (!panel || role !== 'master') return;
+
+        const title = document.getElementById('item-settings-list-title');
+        if (title) title.textContent = currentItemSettingsKind === 'training' ? 'ウエイト種目' : '野球指標';
+        const nameLabel = document.getElementById('item-setting-name-label');
+        if (nameLabel) nameLabel.textContent = currentItemSettingsKind === 'training' ? '種目名' : '項目名';
+
+        document.querySelectorAll('.item-kind-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.itemKind === currentItemSettingsKind);
+        });
+
+        const listEl = document.getElementById('item-settings-list');
+        if (!listEl) return;
+
+        const items = getCurrentItemList()
+            .slice()
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+        if (!items.length) {
+            listEl.innerHTML = '<div class="item-settings-empty">項目がありません</div>';
+            fillItemSettingForm();
+            return;
+        }
+
+        const selectedId = document.getElementById('item-setting-id')?.value || items[0].id;
+        listEl.innerHTML = items.map(item => `
+            <button type="button" class="item-settings-row ${item.id === selectedId ? 'active' : ''}" data-item-id="${escapeHtml(item.id)}">
+                <span>
+                    <strong>${escapeHtml(item.label || item.name)}</strong>
+                    <small>${escapeHtml(getAttributeLabel(item.attribute))} / ${escapeHtml(item.direction === 'lower' ? '低いほど良い' : '高いほど良い')}</small>
+                </span>
+                <em>${escapeHtml(item.target80)}${escapeHtml(item.unit)} = ${escapeHtml(item.score80)}点</em>
+                ${item.active === false ? '<i class="fa-solid fa-eye-slash" title="非表示"></i>' : ''}
+            </button>
+        `).join('');
+
+        const selectedItem = items.find(item => item.id === selectedId) || items[0];
+        fillItemSettingForm(selectedItem);
+    }
+
+    function readItemSettingForm() {
+        const id = document.getElementById('item-setting-id')?.value || '';
+        const name = document.getElementById('item-setting-name')?.value.trim() || '';
+        const target80 = Number(document.getElementById('item-setting-target80')?.value);
+        const score80 = Number(document.getElementById('item-setting-score80')?.value);
+        const unit = document.getElementById('item-setting-unit')?.value.trim() || '';
+        const attribute = document.getElementById('item-setting-attribute')?.value || 'power';
+        const direction = document.getElementById('item-setting-direction')?.value || 'higher';
+        const active = document.getElementById('item-setting-active')?.checked !== false;
+
+        if (!name) throw new Error('名称を入力してください。');
+        if (!Number.isFinite(target80) || target80 <= 0) throw new Error('140km/hラインは正の数値で入力してください。');
+        if (!Number.isFinite(score80) || score80 <= 0 || score80 > 100) throw new Error('基準点は1〜100で入力してください。');
+
+        return normalizeItemDefinition(currentItemSettingsKind, {
+            id: id || `${currentItemSettingsKind}:${Date.now()}`,
+            name,
+            label: name,
+            attribute,
+            target80,
+            score80,
+            direction,
+            unit,
+            active
+        });
+    }
+
+    async function refreshAfterItemSettingsChange() {
+        applyItemDefinitions();
+        renderItemSettings();
+        if (dashboardLastData && dashboardLastFilters) {
+            updateDashboardCharts(dashboardLastData, dashboardLastFilters);
+            updateDashboardRecordHistory(dashboardLastData, dashboardLastFilters);
+        }
+        await window.updateRanking?.();
+        if (document.getElementById('my-ability')?.classList.contains('active')) {
+            await updateMyAbility();
+        }
+    }
+
+    function getDashboardHistorySelection() {
+        const select = document.getElementById('dashboard-history-type');
+        const rawValue = select?.value || 'weight';
+        const label = select?.selectedOptions?.[0]?.textContent?.trim() || '';
+        const readType = (prefix) => rawValue.slice(prefix.length);
+
+        if (rawValue === 'bodyfat') {
+            return {
+                category: 'bodyfat',
+                label: '体脂肪率',
+                title: '体脂肪率の記録履歴',
+                statusTitle: '体脂肪率'
+            };
+        }
+
+        if (rawValue.startsWith('training:')) {
+            const type = readType('training:') || DASHBOARD_DEFINITIONS.defaults.trainingType;
+            return {
+                category: 'training',
+                type,
+                label: label || type,
+                title: `${label || type} の記録履歴`,
+                statusTitle: label || type
+            };
+        }
+
+        if (rawValue.startsWith('stats:')) {
+            const type = readType('stats:') || DASHBOARD_DEFINITIONS.defaults.statType;
+            return {
+                category: 'stats',
+                type,
+                label: label || type,
+                title: `${label || type} の記録履歴`,
+                statusTitle: label || type
+            };
+        }
+
+        if (rawValue.startsWith('ratio:')) {
+            const type = readType('ratio:') || DASHBOARD_DEFINITIONS.defaults.trainingType;
+            return {
+                category: 'ratio',
+                type,
+                label: label || type,
+                title: `${label || type} 単位仕事量の記録履歴`,
+                statusTitle: `${label || type} 単位仕事量`
+            };
+        }
+
+        return {
+            category: 'weight',
+            label: '体重',
+            title: '体重の記録履歴',
+            statusTitle: '体重'
+        };
+    }
+
+    function getDashboardPeriodStart(period, baseDate = new Date()) {
+        const start = new Date(baseDate);
+        if (period === CONSTANTS.DASHBOARD_PERIODS.ALL) return null;
+        if (period === CONSTANTS.DASHBOARD_PERIODS.ONE_WEEK) start.setDate(start.getDate() - 7);
+        else if (period === CONSTANTS.DASHBOARD_PERIODS.ONE_MONTH) start.setMonth(start.getMonth() - 1);
+        else if (period === CONSTANTS.DASHBOARD_PERIODS.SIX_MONTHS) start.setMonth(start.getMonth() - 6);
+        else start.setMonth(start.getMonth() - 3);
+        start.setHours(0, 0, 0, 0);
+        return start;
+    }
+
+    function filterRecordsByDashboardPeriod(records, period) {
+        const start = getDashboardPeriodStart(period);
+        if (!start) return records;
+        return records.filter(record => record.date && new Date(record.date) >= start);
+    }
+
+    function setActiveDashboardGraph(graphId = DASHBOARD_DEFINITIONS.defaults.graph) {
+        const activeGraph = DASHBOARD_DEFINITIONS.graphs.some(graph => graph.id === graphId)
+            ? graphId
+            : DASHBOARD_DEFINITIONS.defaults.graph;
+
+        graphTabs.forEach(tab => {
+            const isActive = tab.getAttribute('data-graph') === activeGraph;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', String(isActive));
+        });
+
+        document.querySelectorAll('.chart-card[id^="graph-card-"]').forEach(card => {
+            const isActive = card.id === `graph-card-${activeGraph}`;
+            card.classList.toggle('is-active-mobile', isActive);
+        });
+
+        setTimeout(() => {
+            [weightChartInstance, bodyFatChartInstance, trainingChartInstance, statsChartInstance, ratioChartInstance, abilityChartInstance]
+                .forEach(chart => chart?.resize());
+        }, 0);
+
+        if (dashboardLastData && dashboardLastFilters) {
+            updateDashboardRecordHistory(dashboardLastData, dashboardLastFilters);
+        }
+    }
 
     // ---------- Sidebar & Navigation ----------
 
@@ -102,6 +661,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!targetPane) return;
                 targetPane.classList.add('active');
                 pageTitle.innerText = link.innerText.trim();
+                if (targetTab === 'my-ability') {
+                    updateMyAbility();
+                    setTimeout(() => abilityChartInstance?.resize(), 0);
+                }
 
                 // Mobile specific: close sidebar
                 if (window.innerWidth <= 900) {
@@ -125,12 +688,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Graph Tab Switching
         graphTabs.forEach(tab => {
             tab.addEventListener('click', () => {
-                graphTabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                const targetGraph = tab.getAttribute('data-graph');
-                document.querySelectorAll('.chart-card').forEach(card => card.style.display = 'none');
-                const targetEl = document.getElementById(`graph-card-${targetGraph}`);
-                if (targetEl) targetEl.style.display = 'block';
+                setActiveDashboardGraph(tab.getAttribute('data-graph'));
             });
         });
 
@@ -144,6 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     initNavListeners();
     applyViewMode();
+    initDashboardDefinitions();
 
     // ---------- View Toggle Logic (PC / Mobile) ----------
 
@@ -209,47 +768,93 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Initialize Charts
-    weightChartInstance = createLineChart(document.getElementById('weightChart'), '体重 (kg)', CONSTANTS.CHART_COLORS.WEIGHT, {
-        showLegend: true,
-        extraOptions: {
-            scales: {
-                y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(255, 255, 255, 0.05)' } },
-                y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
+    function createAbilityChart(ctx) {
+        if (!ctx) return null;
+        const labels = ABILITY_CONFIG.attributes.map(attribute => attribute.label);
+        return new Chart(ctx, {
+            type: 'radar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: '現状',
+                        data: labels.map(() => 0),
+                        borderColor: CONSTANTS.CHART_COLORS.STATS,
+                        backgroundColor: 'rgba(59, 130, 246, 0.18)',
+                        borderWidth: 3,
+                        pointBackgroundColor: CONSTANTS.CHART_COLORS.STATS,
+                        pointBorderColor: '#fff',
+                        pointRadius: 4
+                    },
+                    {
+                        label: '140km/hライン',
+                        data: labels.map(() => ABILITY_CONFIG.targetLineScore),
+                        borderColor: CONSTANTS.CHART_COLORS.BODY_FAT,
+                        backgroundColor: 'rgba(249, 115, 22, 0.04)',
+                        borderWidth: 2,
+                        borderDash: [6, 6],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#cbd5e1',
+                            boxWidth: 12,
+                            font: { size: 12 }
+                        }
+                    }
+                },
+                scales: {
+                    r: {
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            stepSize: 20,
+                            color: '#94a3b8',
+                            backdropColor: 'transparent'
+                        },
+                        pointLabels: {
+                            color: '#f8fafc',
+                            font: { size: 13, weight: '700' }
+                        },
+                        grid: { color: 'rgba(255, 255, 255, 0.11)' },
+                        angleLines: { color: 'rgba(255, 255, 255, 0.15)' }
+                    }
+                }
             }
-        }
-    });
-    if (weightChartInstance) {
-        weightChartInstance.data.datasets.push({
-            label: '体脂肪率 (%)',
-            data: [],
-            borderColor: CONSTANTS.CHART_COLORS.BODY_FAT,
-            backgroundColor: 'transparent',
-            borderWidth: 2,
-            borderDash: [5, 5],
-            tension: 0.4,
-            yAxisID: 'y1'
         });
     }
 
-    speedChartInstance = createLineChart(document.getElementById('pitchSpeedChart'), 'MAX球速 (km/h)', CONSTANTS.CHART_COLORS.SPEED, {
-        yScale: { min: 100 }
-    });
+    // Initialize Charts
+    weightChartInstance = createLineChart(document.getElementById('weightChart'), '体重 (kg)', CONSTANTS.CHART_COLORS.WEIGHT);
+    bodyFatChartInstance = createLineChart(document.getElementById('bodyFatChart'), '体脂肪率 (%)', CONSTANTS.CHART_COLORS.BODY_FAT);
     trainingChartInstance = createLineChart(document.getElementById('trainingChart'), '重量 (kg)', CONSTANTS.CHART_COLORS.TRAINING);
     statsChartInstance = createLineChart(document.getElementById('statsChart'), '記録', CONSTANTS.CHART_COLORS.STATS);
     ratioChartInstance = createLineChart(document.getElementById('ratioChart'), '単位仕事量 (重量/体重)', CONSTANTS.CHART_COLORS.RATIO);
+    abilityChartInstance = createAbilityChart(document.getElementById('abilityChart'));
+    setActiveDashboardGraph();
 
     // ---------- Event Listeners ----------
 
     function isMedicineBallType(typeName) {
-        return /メディシンボール|立幅|立ち三段/.test(typeName || '');
+        return /メディシンボール/.test(typeName || '');
     }
 
     function getTrainingValueLabel(typeName) {
+        const configuredUnit = itemDefinitionsState ? getItemDefinition('training', typeName)?.unit : '';
+        if (configuredUnit && configuredUnit !== 'kg') return `記録 (${configuredUnit})`;
         return isMedicineBallType(typeName) ? '飛距離 (m)' : '重量 (kg)';
     }
 
     function getTrainingValueUnit(typeName) {
+        const configuredUnit = itemDefinitionsState ? getItemDefinition('training', typeName)?.unit : '';
+        if (configuredUnit) return configuredUnit;
         return isMedicineBallType(typeName) ? 'm' : 'kg';
     }
 
@@ -304,6 +909,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initEventListeners() {
+        const masterFilterPanel = document.getElementById('master-dash-filters');
+        const masterFilterToggle = document.getElementById('toggle-master-dash-filters');
+        if (masterFilterPanel && masterFilterToggle) {
+            const setFilterOpen = (isOpen) => {
+                masterFilterPanel.classList.toggle('is-open', isOpen);
+                masterFilterToggle.setAttribute('aria-expanded', String(isOpen));
+                localStorage.setItem('masterDashFiltersOpen', String(isOpen));
+            };
+            setFilterOpen(localStorage.getItem('masterDashFiltersOpen') === 'true');
+            masterFilterToggle.addEventListener('click', () => {
+                setFilterOpen(!masterFilterPanel.classList.contains('is-open'));
+            });
+        }
+
         // Toggle logic for message history
         document.getElementById('toggle-comments-history')?.addEventListener('click', () => {
             const historyContainer = document.getElementById('dashboard-comments-history');
@@ -319,10 +938,97 @@ document.addEventListener('DOMContentLoaded', () => {
         const filterIds = [
             'dash-filter-grade', 'dash-filter-player', 'dash-filter-position', 'dash-filter-period', 
             'dash-exclude-grade', 'dash-exclude-position', 'dash-exclude-player',
-            'training-chart-type', 'stats-chart-type', 'weight-chart-range', 'speed-chart-range'
+            'training-chart-type', 'stats-chart-type'
         ];
         filterIds.forEach(id => {
-            document.getElementById(id)?.addEventListener('change', () => updateDashboard());
+            document.getElementById(id)?.addEventListener('change', () => {
+                if (id === 'training-chart-type') setActiveDashboardGraph('training');
+                if (id === 'stats-chart-type') setActiveDashboardGraph('stats');
+                updateDashboard();
+            });
+        });
+
+        document.getElementById('dashboard-history-type')?.addEventListener('change', () => {
+            if (dashboardLastData && dashboardLastFilters) {
+                updateDashboardRecordHistory(dashboardLastData, dashboardLastFilters);
+            } else {
+                updateDashboard();
+            }
+        });
+
+        document.getElementById('ability-player-select')?.addEventListener('change', (event) => {
+            localStorage.setItem('abilityPlayerId', event.target.value);
+            updateMyAbility();
+        });
+
+        document.querySelectorAll('.item-kind-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                currentItemSettingsKind = tab.dataset.itemKind || 'training';
+                fillItemSettingForm();
+                renderItemSettings();
+            });
+        });
+
+        document.getElementById('item-settings-list')?.addEventListener('click', (event) => {
+            const row = event.target.closest('.item-settings-row');
+            if (!row) return;
+            const item = getCurrentItemList().find(candidate => candidate.id === row.dataset.itemId);
+            if (item) {
+                fillItemSettingForm(item);
+                renderItemSettings();
+            }
+        });
+
+        document.getElementById('item-settings-new-btn')?.addEventListener('click', () => {
+            fillItemSettingForm();
+            document.getElementById('item-setting-name')?.focus();
+        });
+
+        document.getElementById('item-setting-form')?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            try {
+                const nextItem = readItemSettingForm();
+                const current = getCurrentItemList();
+                const duplicate = current.find(item => (
+                    item.id !== nextItem.id && item.name === nextItem.name
+                ));
+                if (duplicate) {
+                    alert('同じ名前の項目が既にあります。');
+                    return;
+                }
+
+                const index = current.findIndex(item => item.id === nextItem.id);
+                const nextList = index >= 0
+                    ? current.map(item => item.id === nextItem.id ? { ...nextItem, sortOrder: item.sortOrder } : item)
+                    : [...current, { ...nextItem, sortOrder: current.length }];
+
+                setCurrentItemList(nextList);
+                applyItemDefinitions();
+                await saveItemSettings();
+                await refreshAfterItemSettingsChange();
+                fillItemSettingForm(nextItem);
+                renderItemSettings();
+            } catch (err) {
+                alert(err.message || '保存に失敗しました。');
+            }
+        });
+
+        document.getElementById('item-settings-delete-btn')?.addEventListener('click', async () => {
+            const id = document.getElementById('item-setting-id')?.value;
+            if (!id) return;
+            const item = getCurrentItemList().find(candidate => candidate.id === id);
+            if (!item) return;
+            if (!confirm(`${item.name} を削除しますか？既存の記録データは削除されません。`)) return;
+
+            try {
+                setCurrentItemList(getCurrentItemList().filter(candidate => candidate.id !== id));
+                fillItemSettingForm();
+                applyItemDefinitions();
+                await saveItemSettings();
+                await refreshAfterItemSettingsChange();
+            } catch (err) {
+                alert(err.message || '削除に失敗しました。');
+            }
         });
 
         // Header Auth Buttons
@@ -409,7 +1115,7 @@ document.addEventListener('DOMContentLoaded', () => {
             grade: 'all',
             position: 'all',
             playerId: currentUserId,
-            period: CONSTANTS.PERIODS.DAILY,
+            period: document.getElementById('dash-filter-period')?.value || DASHBOARD_DEFINITIONS.defaults.period,
             exclude: {
                 grade: 'none',
                 position: 'none',
@@ -421,7 +1127,6 @@ document.addEventListener('DOMContentLoaded', () => {
             filters.grade = document.getElementById('dash-filter-grade')?.value || 'all';
             filters.position = document.getElementById('dash-filter-position')?.value || 'all';
             filters.playerId = document.getElementById('dash-filter-player')?.value || 'all';
-            filters.period = document.getElementById('dash-filter-period')?.value || CONSTANTS.PERIODS.DAILY;
             
             filters.exclude.grade = document.getElementById('dash-exclude-grade')?.value || 'none';
             filters.exclude.position = document.getElementById('dash-exclude-position')?.value || 'none';
@@ -432,79 +1137,126 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyDashboardCriteria(data, players, filters, role) {
         let { allWeights, allStats, allTraining } = data;
+        let targetPlayers = [];
 
-        if (role === 'master' && filters.playerId === 'all') {
-            let targetPlayers = [...players];
-            
-            // Inclusion
-            if (filters.grade !== 'all') targetPlayers = targetPlayers.filter(p => p.grade === filters.grade);
-            if (filters.position !== 'all') targetPlayers = targetPlayers.filter(p => p.position === filters.position);
-            
-            // Exclusion
-            if (filters.exclude.grade !== 'none') targetPlayers = targetPlayers.filter(p => p.grade !== filters.exclude.grade);
-            if (filters.exclude.position !== 'none') targetPlayers = targetPlayers.filter(p => p.position !== filters.exclude.position);
-            if (filters.exclude.playerId !== 'none') targetPlayers = targetPlayers.filter(p => p.id !== filters.exclude.playerId);
-            
+        if (role === 'master') {
+            if (filters.playerId === 'all') {
+                targetPlayers = [...players];
+
+                if (filters.grade !== 'all') targetPlayers = targetPlayers.filter(p => p.grade === filters.grade);
+                if (filters.position !== 'all') targetPlayers = targetPlayers.filter(p => p.position === filters.position);
+                if (filters.exclude.grade !== 'none') targetPlayers = targetPlayers.filter(p => p.grade !== filters.exclude.grade);
+                if (filters.exclude.position !== 'none') targetPlayers = targetPlayers.filter(p => p.position !== filters.exclude.position);
+                if (filters.exclude.playerId !== 'none') targetPlayers = targetPlayers.filter(p => p.id !== filters.exclude.playerId);
+            } else {
+                targetPlayers = players.filter(p => p.id === filters.playerId);
+            }
+
             const targetPlayerIds = new Set(targetPlayers.map(p => p.id));
-            
+
             allWeights = allWeights.filter(r => targetPlayerIds.has(r.playerId));
             allStats = allStats.filter(r => targetPlayerIds.has(r.playerId));
             allTraining = allTraining.filter(r => targetPlayerIds.has(r.playerId));
+        } else {
+            targetPlayers = players.filter(p => p.id === filters.playerId);
         }
 
-        return { allWeights, allStats, allTraining };
+        return { allWeights, allStats, allTraining, targetPlayers };
+    }
+
+    function renderChartValueStrip(containerId, points, valueFormatter) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+
+        const formatDate = (dateStr) => {
+            const match = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (match) return `${Number(match[2])}/${Number(match[3])}`;
+            return dateStr || '';
+        };
+
+        const rows = [...points]
+            .filter(point => point && point.date && point.value !== null && point.value !== undefined)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 6);
+
+        if (!rows.length) {
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = rows.map(point => `
+            <div class="chart-value-chip">
+                <time>${escapeHtml(formatDate(point.date))}</time>
+                <strong>${escapeHtml(valueFormatter(point.value))}</strong>
+            </div>
+        `).join('');
     }
 
     function updateDashboardCharts(data, filters) {
         const { allWeights, allStats, allTraining } = data;
         const { period } = filters;
+        const scopedWeights = filterRecordsByDashboardPeriod(allWeights, period);
+        const scopedStats = filterRecordsByDashboardPeriod(allStats, period);
+        const scopedTraining = filterRecordsByDashboardPeriod(allTraining, period);
 
         // 1. Weight Chart
-        const weightRange = parseInt(document.getElementById('weight-chart-range')?.value || '3');
-        const weightCutoff = new Date();
-        weightCutoff.setMonth(weightCutoff.getMonth() - weightRange);
-        const filteredWeights = allWeights.filter(r => new Date(r.date) >= weightCutoff);
-        const aggWeights = aggregateData(filteredWeights, period, 'weight', 'bodyFat');
+        const aggWeights = aggregateData(scopedWeights, CONSTANTS.PERIODS.DAILY, 'weight', 'bodyFat');
 
         if (weightChartInstance) {
             weightChartInstance.data.labels = aggWeights.map(d => d.date.substring(5));
             weightChartInstance.data.datasets[0].data = aggWeights.map(d => d.value);
-            weightChartInstance.data.datasets[1].data = aggWeights.map(d => d.value2);
             weightChartInstance.update();
         }
+        renderChartValueStrip(
+            'chart-values-weight',
+            aggWeights.map(point => ({ date: point.date, value: point.value })),
+            value => `${Number(value).toFixed(1)}kg`
+        );
 
-        // 2. Speed Chart
-        const speedRange = parseInt(document.getElementById('speed-chart-range')?.value || '6');
-        const speedCutoff = new Date();
-        speedCutoff.setMonth(speedCutoff.getMonth() - speedRange);
-        const rawSpeedData = allStats.filter(r => r.type === '球速 (km/h)' && new Date(r.date) >= speedCutoff);
-        const aggSpeed = aggregateData(rawSpeedData, period, 'value');
-
-        if (speedChartInstance) {
-            speedChartInstance.data.labels = aggSpeed.map(d => d.date.substring(5));
-            speedChartInstance.data.datasets[0].data = aggSpeed.map(d => d.value);
-            const maxVal = Math.max(...aggSpeed.map(d => d.value || 0), 120);
-            speedChartInstance.options.scales.y.max = Math.ceil(maxVal / 5) * 5 + 5;
-            speedChartInstance.options.scales.y.min = Math.max(0, Math.floor((maxVal - 20) / 10) * 10);
-            speedChartInstance.update();
+        // 2. Body Fat Chart
+        const bodyFatData = aggWeights.filter(d => d.value2 !== null);
+        if (bodyFatChartInstance) {
+            bodyFatChartInstance.data.labels = bodyFatData.map(d => d.date.substring(5));
+            bodyFatChartInstance.data.datasets[0].data = bodyFatData.map(d => d.value2);
+            bodyFatChartInstance.update();
         }
+        renderChartValueStrip(
+            'chart-values-bodyfat',
+            bodyFatData.map(point => ({ date: point.date, value: point.value2 })),
+            value => `${Number(value).toFixed(1)}%`
+        );
 
         // 3. Training Chart
-        const trainingType = document.getElementById('training-chart-type')?.value || 'スクワット';
-        const rawTrainData = allTraining.filter(r => r.type === trainingType);
-        const aggTrain = aggregateData(rawTrainData, period, 'weight');
+        const trainingType = document.getElementById('training-chart-type')?.value || DASHBOARD_DEFINITIONS.defaults.trainingType;
+        const rawTrainData = scopedTraining.filter(r => r.type === trainingType);
+        const aggTrain = aggregateData(rawTrainData, CONSTANTS.PERIODS.DAILY, 'weight');
+        const trainingUnit = getTrainingValueUnit(trainingType);
 
         if (trainingChartInstance) {
             trainingChartInstance.data.labels = aggTrain.map(d => d.date.substring(5));
-            trainingChartInstance.data.datasets[0].label = `${trainingType} (${getTrainingValueUnit(trainingType)})`;
+            trainingChartInstance.data.datasets[0].label = `${trainingType} (${trainingUnit})`;
             trainingChartInstance.data.datasets[0].data = aggTrain.map(d => d.value);
             trainingChartInstance.update();
         }
+        renderChartValueStrip(
+            'chart-values-training',
+            aggTrain.map(point => ({ date: point.date, value: point.value })),
+            value => `${Number(value).toFixed(1)}${trainingUnit}`
+        );
 
         // 4. Stats Chart
-        const statsType = document.getElementById('stats-chart-type')?.value || '遠投 (m)';
-        const rawStatsData = allStats.filter(r => r.type === statsType);
-        const aggStats = aggregateData(rawStatsData, period, 'value');
+        const statsType = document.getElementById('stats-chart-type')?.value || DASHBOARD_DEFINITIONS.defaults.statType;
+        const rawStatsData = scopedStats.filter(r => r.type === statsType);
+        const aggStats = aggregateData(rawStatsData, CONSTANTS.PERIODS.DAILY, 'value');
+        const statUnit = getItemDefinition('stats', statsType)?.unit || (String(statsType).match(/\(([^)]+)\)/) || [])[1] || '';
 
         if (statsChartInstance) {
             statsChartInstance.data.labels = aggStats.map(d => d.date.substring(5));
@@ -512,6 +1264,11 @@ document.addEventListener('DOMContentLoaded', () => {
             statsChartInstance.data.datasets[0].data = aggStats.map(d => d.value);
             statsChartInstance.update();
         }
+        renderChartValueStrip(
+            'chart-values-stats',
+            aggStats.map(point => ({ date: point.date, value: point.value })),
+            value => `${Number(value).toFixed(2)}${statUnit}`
+        );
 
         // 5. Ratio Chart
         if (ratioChartInstance) {
@@ -519,10 +1276,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 ratioChartInstance.data.labels = [];
                 ratioChartInstance.data.datasets[0].data = [];
                 ratioChartInstance.update();
+                renderChartValueStrip('chart-values-ratio', [], value => value);
                 return;
             }
-            const sortedWeights = [...allWeights].sort((a,b) => new Date(a.date) - new Date(b.date));
-            const trainingBySelectedType = allTraining.filter(t => t.type === trainingType);
+            const sortedWeights = [...scopedWeights].sort((a,b) => new Date(a.date) - new Date(b.date));
+            const trainingBySelectedType = scopedTraining.filter(t => t.type === trainingType);
             const ratioPoints = [];
             trainingBySelectedType.forEach(t => {
                 let weightRecord = sortedWeights.find(w => w.date === t.date);
@@ -538,65 +1296,370 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
             });
-            const aggRatio = aggregateData(ratioPoints, period, 'value');
+            const aggRatio = aggregateData(ratioPoints, CONSTANTS.PERIODS.DAILY, 'value');
             ratioChartInstance.data.labels = aggRatio.map(d => d.date.substring(5));
             ratioChartInstance.data.datasets[0].data = aggRatio.map(d => d.value);
             ratioChartInstance.update();
+            renderChartValueStrip(
+                'chart-values-ratio',
+                aggRatio.map(point => ({ date: point.date, value: point.value })),
+                value => Number(value).toFixed(2)
+            );
         }
     }
 
     function updateDashboardStats(data) {
-        const { allWeights, allStats, allTraining } = data;
-        const currentTrainingType = document.getElementById('training-chart-type')?.value || 'スクワット';
+        const { allWeights } = data;
+        const recentWeights = filterRecordsByDashboardPeriod(allWeights, CONSTANTS.DASHBOARD_PERIODS.THREE_MONTHS);
 
-        // Reset
-        const ids = ['dash-weight', 'dash-speed', 'dash-squat', 'dash-throw', 'dash-ratio'];
-        ids.forEach(id => document.getElementById(id).textContent = '--');
-        const trendIds = ['dash-weight-trend', 'dash-speed-trend', 'dash-squat-trend', 'dash-throw-trend', 'dash-ratio-trend'];
-        trendIds.forEach(id => document.getElementById(id).innerHTML = '<i class="fa-solid fa-minus"></i> データなし');
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
 
-        const lastWeight = getLatestVal(allWeights, 'weight');
-        if (lastWeight !== null) {
-            document.getElementById('dash-weight').textContent = lastWeight.toFixed(1);
-            const sortedWeights = [...allWeights].sort((a, b) => new Date(a.date) - new Date(b.date));
-            if (sortedWeights.length > 1) {
-                const lastDate = sortedWeights[sortedWeights.length - 1].date;
-                const prevRecords = sortedWeights.filter(r => r.date < lastDate);
-                if (prevRecords.length > 0) {
-                    const prevWeight = getLatestVal(prevRecords, 'weight');
-                    const diff = (lastWeight - prevWeight).toFixed(1);
-                    const tEl = document.getElementById('dash-weight-trend');
-                    tEl.className = `trend ${diff > 0 ? 'up' : diff < 0 ? 'down' : 'neutral'}`;
-                    tEl.innerHTML = `<i class="fa-solid ${diff > 0 ? 'fa-arrow-up' : diff < 0 ? 'fa-arrow-down' : 'fa-minus'}"></i> ${diff > 0 ? '+':''}${diff}kg`;
-                }
-            }
-        }
+        const calcMetric = (records, key) => {
+            const values = records
+                .filter(record => record[key] !== null && record[key] !== undefined && record[key] !== '')
+                .sort((a, b) => new Date(a.date) - new Date(b.date))
+                .map(record => Number(record[key]))
+                .filter(value => Number.isFinite(value));
 
-        const speedEntries = allStats.filter(s => s.type === '球速 (km/h)');
-        if (speedEntries.length > 0) {
-            document.getElementById('dash-speed').textContent = Math.max(...speedEntries.map(s => s.value));
-            document.getElementById('dash-speed-trend').innerHTML = '<i class="fa-solid fa-fire"></i> 自己最高';
-        }
+            if (!values.length) return { max: null, ave: null, growth: null };
 
-        const squatEntries = allTraining.filter(s => s.type === 'スクワット');
-        if (squatEntries.length > 0) {
-            document.getElementById('dash-squat').textContent = Math.max(...squatEntries.map(s => s.weight));
-            document.getElementById('dash-squat-trend').innerHTML = '<i class="fa-solid fa-dumbbell"></i> 自己最高';
-        }
+            const first = values[0];
+            const last = values[values.length - 1];
+            const growth = values.length > 1 ? last - first : null;
 
-        const throwEntries = allStats.filter(s => s.type === '遠投 (m)');
-        if (throwEntries.length > 0) {
-            document.getElementById('dash-throw').textContent = Math.max(...throwEntries.map(s => s.value));
-            document.getElementById('dash-throw-trend').innerHTML = '<i class="fa-solid fa-baseball-bat-ball"></i> 自己最高';
-        }
+            return {
+                max: Math.max(...values),
+                ave: values.reduce((sum, value) => sum + value, 0) / values.length,
+                growth
+            };
+        };
 
-        const specificTrainingEntries = allTraining.filter(s => s.type === currentTrainingType);
-        const lastLift = getLatestVal(specificTrainingEntries, 'weight');
-        if (lastLift !== null && lastWeight !== null && lastWeight > 0) {
-            document.getElementById('dash-ratio').textContent = (lastLift / lastWeight).toFixed(2);
-            document.getElementById('dash-ratio-trend').innerHTML = `<i class="fa-solid fa-scale-balanced"></i> ${currentTrainingType}基準`;
-        }
+        const formatSigned = (value, digits = 1) => {
+            if (value === null) return '--';
+            const rounded = Number(value.toFixed(digits));
+            return `${rounded > 0 ? '+' : ''}${rounded.toFixed(digits)}`;
+        };
+
+        const renderMetric = (prefix, metric, digits = 1) => {
+            setText(`${prefix}-max`, metric.max === null ? '--' : metric.max.toFixed(digits));
+            setText(`${prefix}-ave`, metric.ave === null ? '--' : metric.ave.toFixed(digits));
+            setText(`${prefix}-growth`, formatSigned(metric.growth, digits));
+        };
+
+        renderMetric('dash-weight', calcMetric(recentWeights, 'weight'), 1);
+        renderMetric('dash-bodyfat', calcMetric(recentWeights, 'bodyFat'), 1);
     }
+
+    function updateDashboardRecordHistory(data, filters) {
+        const container = document.getElementById('dashboard-record-history');
+        const titleEl = document.getElementById('dashboard-history-title');
+        const countEl = document.getElementById('dashboard-history-count');
+        if (!container) return;
+        updateDashboardWeeklyStatus(data, filters);
+
+        const historySelection = getDashboardHistorySelection();
+        const period = filters.period || DASHBOARD_DEFINITIONS.defaults.period;
+        const scopedWeights = filterRecordsByDashboardPeriod(data.allWeights, period);
+        const scopedStats = filterRecordsByDashboardPeriod(data.allStats, period);
+        const scopedTraining = filterRecordsByDashboardPeriod(data.allTraining, period);
+
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+
+        const formatDate = (dateStr) => {
+            const match = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (match) return `${Number(match[2])}/${Number(match[3])}`;
+            return dateStr || '';
+        };
+
+        const formatValue = (value, digits = 1) => {
+            const number = Number(value);
+            return Number.isFinite(number) ? number.toFixed(digits) : '--';
+        };
+
+        const getStatUnit = (typeName) => {
+            const configuredUnit = getItemDefinition('stats', typeName)?.unit;
+            if (configuredUnit) return configuredUnit;
+            const match = String(typeName || '').match(/\(([^)]+)\)/);
+            return match ? match[1] : '';
+        };
+
+        let title = '記録履歴';
+        let rows = [];
+
+        if (historySelection.category === 'training') {
+            const trainingType = historySelection.type;
+            const unit = getTrainingValueUnit(trainingType);
+            title = historySelection.title;
+            rows = scopedTraining
+                .filter(record => record.type === trainingType)
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map(record => ({
+                    date: record.date,
+                    value: `${formatValue(record.weight, 2)}${unit}`,
+                    detail: isMedicineBallType(record.type) ? '' : `${record.reps || '--'}回 x ${record.sets || '--'}セット`
+                }));
+        } else if (historySelection.category === 'stats') {
+            const statsType = historySelection.type;
+            const unit = getStatUnit(statsType);
+            title = historySelection.title;
+            rows = scopedStats
+                .filter(record => record.type === statsType)
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map(record => ({
+                    date: record.date,
+                    value: `${formatValue(record.value, 2)}${unit}`,
+                    detail: ''
+                }));
+        } else if (historySelection.category === 'ratio') {
+            const trainingType = historySelection.type;
+            title = historySelection.title;
+
+            if (!isMedicineBallType(trainingType)) {
+                const sortedWeights = [...scopedWeights].sort((a, b) => new Date(a.date) - new Date(b.date));
+                rows = scopedTraining
+                    .filter(record => record.type === trainingType)
+                    .map(record => {
+                        let weightRecord = sortedWeights.find(weight => weight.date === record.date);
+                        if (!weightRecord) {
+                            const pastWeights = sortedWeights.filter(weight => weight.date < record.date);
+                            if (pastWeights.length > 0) weightRecord = pastWeights[pastWeights.length - 1];
+                        }
+                        if (!weightRecord || !weightRecord.weight) return null;
+                        return {
+                            date: record.date,
+                            value: formatValue(Number(record.weight) / Number(weightRecord.weight), 2),
+                            detail: `${formatValue(record.weight, 1)}kg / 体重 ${formatValue(weightRecord.weight, 1)}kg`
+                        };
+                    })
+                    .filter(Boolean)
+                    .sort((a, b) => new Date(b.date) - new Date(a.date));
+            }
+        } else if (historySelection.category === 'bodyfat') {
+            title = historySelection.title;
+            rows = [...scopedWeights]
+                .filter(record => record.bodyFat !== null && record.bodyFat !== undefined && record.bodyFat !== '')
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map(record => ({
+                    date: record.date,
+                    value: `体脂肪率 ${formatValue(record.bodyFat, 1)}%`,
+                    detail: record.weight === null || record.weight === undefined || record.weight === ''
+                        ? ''
+                        : `体重 ${formatValue(record.weight, 1)}kg`
+                }));
+        } else {
+            title = historySelection.title;
+            rows = [...scopedWeights]
+                .filter(record => record.weight !== null && record.weight !== undefined && record.weight !== '')
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map(record => ({
+                    date: record.date,
+                    value: `体重 ${formatValue(record.weight, 1)}kg`,
+                    detail: record.bodyFat === null || record.bodyFat === undefined || record.bodyFat === ''
+                        ? '体脂肪率 --'
+                        : `体脂肪率 ${formatValue(record.bodyFat, 1)}%`
+                }));
+        }
+
+        if (titleEl) titleEl.textContent = title;
+        if (countEl) countEl.textContent = `${rows.length}件`;
+
+        if (!rows.length) {
+            container.innerHTML = '<div class="dashboard-history-empty">表示できる記録がありません</div>';
+            return;
+        }
+
+        container.innerHTML = rows.map(row => `
+            <div class="dashboard-history-row">
+                <time>${escapeHtml(formatDate(row.date))}</time>
+                <strong>${escapeHtml(row.value)}</strong>
+                ${row.detail ? `<span>${escapeHtml(row.detail)}</span>` : ''}
+            </div>
+        `).join('');
+    }
+
+    function updateDashboardWeeklyStatus(data, filters) {
+        const weeklyEl = document.getElementById('dashboard-weekly-status');
+        if (!weeklyEl) return;
+
+        const role = localStorage.getItem('userRole') || 'player';
+        const targetPlayers = Array.from(new Map((data.targetPlayers || [])
+            .filter(player => player && player.id)
+            .map(player => [player.id, player])
+        ).values()).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
+
+        if (role !== 'master' || targetPlayers.length === 0) {
+            weeklyEl.style.display = 'none';
+            dashboardWeeklyStatusCache = [];
+            return;
+        }
+
+        const historySelection = getDashboardHistorySelection();
+        const period = filters.period || DASHBOARD_DEFINITIONS.defaults.period;
+        const scopedWeights = filterRecordsByDashboardPeriod(data.allWeights, period);
+        const scopedStats = filterRecordsByDashboardPeriod(data.allStats, period);
+        const scopedTraining = filterRecordsByDashboardPeriod(data.allTraining, period);
+
+        let sourceRecords = scopedWeights.filter(record => (
+            record.weight !== null && record.weight !== undefined && record.weight !== ''
+        ));
+        let statusTitle = historySelection.statusTitle;
+        if (historySelection.category === 'bodyfat') {
+            sourceRecords = scopedWeights.filter(record => record.bodyFat !== null && record.bodyFat !== undefined && record.bodyFat !== '');
+        } else if (historySelection.category === 'training' || historySelection.category === 'ratio') {
+            const trainingType = historySelection.type;
+            sourceRecords = scopedTraining.filter(record => record.type === trainingType);
+        } else if (historySelection.category === 'stats') {
+            const statsType = historySelection.type;
+            sourceRecords = scopedStats.filter(record => record.type === statsType);
+        }
+
+        const getWeekStart = (dateInput) => {
+            const date = new Date(dateInput);
+            date.setHours(0, 0, 0, 0);
+            const day = date.getDay();
+            const diff = day === 0 ? -6 : 1 - day;
+            date.setDate(date.getDate() + diff);
+            return date;
+        };
+
+        const getWeekEnd = (weekStart) => {
+            const end = new Date(weekStart);
+            end.setDate(end.getDate() + 6);
+            end.setHours(23, 59, 59, 999);
+            return end;
+        };
+
+        const formatWeekLabel = (weekStart) => {
+            const end = getWeekEnd(weekStart);
+            return `${weekStart.getMonth() + 1}/${weekStart.getDate()}週 (${end.getMonth() + 1}/${end.getDate()}まで)`;
+        };
+
+        const periodStart = getDashboardPeriodStart(period);
+        const recordDates = sourceRecords
+            .map(record => record.date ? new Date(record.date) : null)
+            .filter(date => date && !Number.isNaN(date.getTime()));
+        const minRecordDate = recordDates.length
+            ? new Date(Math.min(...recordDates.map(date => date.getTime())))
+            : new Date();
+        const firstWeek = getWeekStart(periodStart || minRecordDate);
+        const lastWeek = getWeekStart(new Date());
+        const weeks = [];
+
+        for (let cursor = new Date(firstWeek); cursor <= lastWeek; cursor.setDate(cursor.getDate() + 7)) {
+            weeks.push(new Date(cursor));
+        }
+
+        const playerName = (player) => player.name || player.id || '不明';
+        dashboardWeeklyStatusCache = weeks.reverse().map((weekStart) => {
+            const weekEnd = getWeekEnd(weekStart);
+            const enteredIds = new Set(sourceRecords
+                .filter(record => {
+                    const date = new Date(record.date);
+                    return date >= weekStart && date <= weekEnd;
+                })
+                .map(record => record.playerId)
+                .filter(Boolean));
+            const enteredPlayers = targetPlayers.filter(player => enteredIds.has(player.id));
+            const missingPlayers = targetPlayers.filter(player => !enteredIds.has(player.id));
+
+            return {
+                label: formatWeekLabel(weekStart),
+                title: statusTitle,
+                enteredPlayers,
+                missingPlayers,
+                enteredNames: enteredPlayers.map(playerName),
+                missingNames: missingPlayers.map(playerName)
+            };
+        });
+
+        if (dashboardWeeklyStatusCache.length === 0) {
+            weeklyEl.style.display = 'none';
+            return;
+        }
+
+        weeklyEl.style.display = 'block';
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+
+        const visibleWeeks = dashboardWeeklyStatusCache.slice(0, 4);
+        const olderWeeks = dashboardWeeklyStatusCache.slice(4);
+
+        weeklyEl.innerHTML = `
+            <div class="dashboard-weekly-status-header">
+                <span><i class="fa-solid fa-calendar-week"></i> 週ごとの入力状況</span>
+                <small>${escapeHtml(statusTitle)}</small>
+            </div>
+            <div class="dashboard-week-tabs">
+                ${visibleWeeks.map((week, index) => `
+                    <button type="button" class="dashboard-week-tab" onclick="window.openDashboardWeekStatus(${index})">
+                        <span>${escapeHtml(week.label)}</span>
+                        <strong>未入力 ${week.missingPlayers.length}人</strong>
+                    </button>
+                `).join('')}
+                ${olderWeeks.length ? `
+                    <select class="dashboard-week-select" onchange="if(this.value !== '') { window.openDashboardWeekStatus(Number(this.value)); this.value = ''; }">
+                        <option value="">過去の週を選択</option>
+                        ${olderWeeks.map((week, olderIndex) => `
+                            <option value="${olderIndex + 4}">${escapeHtml(week.label)} / 未入力 ${week.missingPlayers.length}人</option>
+                        `).join('')}
+                    </select>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    window.openDashboardWeekStatus = function(index) {
+        const week = dashboardWeeklyStatusCache[index];
+        const modal = document.getElementById('dashboard-weekly-modal');
+        const titleEl = document.getElementById('dashboard-weekly-modal-title');
+        const bodyEl = document.getElementById('dashboard-weekly-modal-body');
+        if (!week || !modal || !bodyEl) return;
+
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+        const listHtml = (names) => names.length
+            ? names.map(name => `<li>${escapeHtml(name)}</li>`).join('')
+            : '<li class="empty">該当なし</li>';
+
+        if (titleEl) titleEl.textContent = `${week.label} / ${week.title}`;
+        bodyEl.innerHTML = `
+            <div class="dashboard-weekly-modal-grid">
+                <section>
+                    <h4>入力している人 <span>${week.enteredNames.length}人</span></h4>
+                    <ul>${listHtml(week.enteredNames)}</ul>
+                </section>
+                <section>
+                    <h4>入力していない人 <span>${week.missingNames.length}人</span></h4>
+                    <ul>${listHtml(week.missingNames)}</ul>
+                </section>
+            </div>
+        `;
+        modal.style.display = 'flex';
+    };
+
+    window.closeDashboardWeekStatusModal = function() {
+        const modal = document.getElementById('dashboard-weekly-modal');
+        if (modal) modal.style.display = 'none';
+    };
 
     async function updateDashboardComments(role, currentUserId) {
         const commentsContainer = document.getElementById('dashboard-comments');
@@ -667,10 +1730,252 @@ document.addEventListener('DOMContentLoaded', () => {
         );
 
         // 4. Update UI Components
+        dashboardLastData = filteredData;
+        dashboardLastFilters = filters;
         updateDashboardCharts(filteredData, filters);
         updateDashboardStats(filteredData);
+        updateDashboardRecordHistory(filteredData, filters);
         await updateDashboardComments(role, currentUserId);
     }
+
+    function getAbilityRule(source, typeName) {
+        const type = String(typeName || '');
+        const managedDefinition = itemDefinitionsState ? getItemDefinition(source, type) : null;
+        if (managedDefinition) {
+            return {
+                attribute: managedDefinition.attribute,
+                target80: managedDefinition.target80,
+                score80: managedDefinition.score80,
+                direction: managedDefinition.direction,
+                unit: managedDefinition.unit
+            };
+        }
+
+        const configuredRule = ABILITY_CONFIG.rules.find(rule => (
+            rule.source === source && rule.pattern.test(type)
+        ));
+        if (configuredRule) return configuredRule;
+
+        if (/柔軟|可動域|肩|股関節|前屈/.test(type)) {
+            return { attribute: 'flexibility', target80: 80, direction: 'higher', unit: '点' };
+        }
+        if (/走|ジャンプ|立幅|三段/.test(type)) {
+            return { attribute: 'burst', target80: /走/.test(type) ? 6.5 : 260, direction: /走/.test(type) ? 'lower' : 'higher', unit: /走/.test(type) ? '秒' : 'cm' };
+        }
+        if (/球速|プルダウン|スイング|メディシン|スロー|クリーン/.test(type)) {
+            return { attribute: 'power', target80: source === 'stats' ? 140 : 90, direction: 'higher', unit: source === 'stats' ? 'km/h' : 'kg' };
+        }
+
+        return ABILITY_CONFIG.fallback[source] || ABILITY_CONFIG.fallback.stats;
+    }
+
+    function getAbilityLatestRecords(records, source) {
+        const valueKey = source === 'training' ? 'weight' : 'value';
+        const byType = new Map();
+
+        records.forEach(record => {
+            const type = record.type || record.otherMemo || '';
+            const value = Number(record[valueKey]);
+            if (!type || !Number.isFinite(value)) return;
+
+            const dateValue = new Date(record.date || 0).getTime();
+            const current = byType.get(type);
+            if (!current || dateValue >= current.dateValue) {
+                byType.set(type, { ...record, source, value, dateValue });
+            }
+        });
+
+        return Array.from(byType.values());
+    }
+
+    function formatAbilityValue(value, unit) {
+        const digits = Math.abs(value) >= 100 ? 0 : 1;
+        return `${Number(value).toFixed(digits)}${unit || ''}`;
+    }
+
+    function getAbilityUnit(source, typeName, rule) {
+        const match = String(typeName || '').match(/\(([^)]+)\)/);
+        if (match) return match[1];
+        if (source === 'training' && !rule.unit) return getTrainingValueUnit(typeName);
+        return rule.unit || '';
+    }
+
+    function buildAbilityRows(trainingRecords, statsRecords) {
+        const attributeMap = new Map(ABILITY_CONFIG.attributes.map(attribute => [
+            attribute.key,
+            { ...attribute, score: null, metrics: [] }
+        ]));
+        const records = [
+            ...getAbilityLatestRecords(trainingRecords, 'training'),
+            ...getAbilityLatestRecords(statsRecords, 'stats')
+        ];
+
+        records.forEach(record => {
+            const rule = getAbilityRule(record.source, record.type);
+            const target80 = Number(rule.target80);
+            if (!Number.isFinite(target80) || target80 <= 0) return;
+
+            const targetScore = Number(rule.score80 || ABILITY_CONFIG.targetLineScore);
+            const rawScore = rule.direction === 'lower'
+                ? (target80 / record.value) * targetScore
+                : (record.value / target80) * targetScore;
+            const score = Math.max(1, Math.min(100, Math.round(rawScore)));
+            const unit = getAbilityUnit(record.source, record.type, rule);
+            const attribute = attributeMap.get(rule.attribute) || attributeMap.get('power');
+
+            attribute.metrics.push({
+                type: record.type,
+                date: record.date,
+                value: record.value,
+                unit,
+                targetScore,
+                score
+            });
+        });
+
+        return ABILITY_CONFIG.attributes.map(attributeConfig => {
+            const attribute = attributeMap.get(attributeConfig.key);
+            const score = attribute.metrics.length
+                ? Math.round(attribute.metrics.reduce((sum, metric) => sum + metric.score, 0) / attribute.metrics.length)
+                : null;
+
+            return {
+                ...attribute,
+                score,
+                targetScore: attribute.metrics.length
+                    ? Math.round(attribute.metrics.reduce((sum, metric) => sum + metric.targetScore, 0) / attribute.metrics.length)
+                    : ABILITY_CONFIG.targetLineScore,
+                achievement: score === null ? null : Math.round((score / (
+                    attribute.metrics.length
+                        ? attribute.metrics.reduce((sum, metric) => sum + metric.targetScore, 0) / attribute.metrics.length
+                        : ABILITY_CONFIG.targetLineScore
+                )) * 100)
+            };
+        });
+    }
+
+    function renderAbilityEmpty(message = '表示できる記録がありません') {
+        const body = document.getElementById('ability-score-body');
+        const playerNameEl = document.getElementById('ability-player-name');
+        if (playerNameEl) playerNameEl.textContent = '--';
+        if (body) {
+            body.innerHTML = `<tr><td colspan="5" class="ability-empty">${message}</td></tr>`;
+        }
+        if (abilityChartInstance) {
+            abilityChartInstance.data.datasets[0].data = ABILITY_CONFIG.attributes.map(() => 0);
+            abilityChartInstance.data.datasets[1].data = ABILITY_CONFIG.attributes.map(() => ABILITY_CONFIG.targetLineScore);
+            abilityChartInstance.update();
+        }
+    }
+
+    function renderAbility(rows, playerName) {
+        const body = document.getElementById('ability-score-body');
+        const playerNameEl = document.getElementById('ability-player-name');
+        if (!body) return;
+
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+
+        if (playerNameEl) playerNameEl.textContent = playerName || '--';
+
+        body.innerHTML = rows.map(row => {
+            const metricLabels = row.metrics
+                .slice(0, 3)
+                .map(metric => `${metric.type} ${formatAbilityValue(metric.value, metric.unit)}`);
+            const extraCount = row.metrics.length - metricLabels.length;
+            const itemsLabel = metricLabels.length
+                ? `${metricLabels.join(' / ')}${extraCount > 0 ? ` 他${extraCount}` : ''}`
+                : '記録なし';
+
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(row.label)}</strong></td>
+                    <td>${row.score === null ? '--' : `${row.score}点`}</td>
+                    <td>${row.targetScore || ABILITY_CONFIG.targetLineScore}点</td>
+                    <td>${row.achievement === null ? '--' : `${row.achievement}%`}</td>
+                    <td>${escapeHtml(itemsLabel)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        if (abilityChartInstance) {
+            abilityChartInstance.data.datasets[0].data = rows.map(row => row.score || 0);
+            abilityChartInstance.data.datasets[1].data = rows.map(row => row.targetScore || ABILITY_CONFIG.targetLineScore);
+            abilityChartInstance.update();
+        }
+    }
+
+    function resolveAbilityPlayerId(players, role, currentUserId) {
+        const control = document.getElementById('ability-player-control');
+        const select = document.getElementById('ability-player-select');
+
+        if (role !== 'master') {
+            if (control) control.style.display = 'none';
+            return currentUserId;
+        }
+
+        if (!control || !select) return '';
+
+        const candidates = players
+            .filter(player => (player.role || 'player') !== 'master')
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
+        control.style.display = 'flex';
+
+        const currentValue = select.value;
+        const storedValue = localStorage.getItem('abilityPlayerId');
+        const dashboardValue = document.getElementById('dash-filter-player')?.value || '';
+        select.innerHTML = '';
+        candidates.forEach(player => {
+            select.appendChild(new Option(player.name || player.id, player.id));
+        });
+
+        const candidateIds = new Set(candidates.map(player => player.id));
+        const selectedValue = [currentValue, storedValue, dashboardValue]
+            .find(value => value && value !== 'all' && candidateIds.has(value)) || candidates[0]?.id || '';
+
+        select.value = selectedValue;
+        if (selectedValue) localStorage.setItem('abilityPlayerId', selectedValue);
+        return selectedValue;
+    }
+
+    async function updateMyAbility() {
+        const body = document.getElementById('ability-score-body');
+        if (!body) return;
+
+        const role = localStorage.getItem('userRole') || 'player';
+        const currentUserId = localStorage.getItem('currentPlayerId');
+        if (role === 'player' && !currentUserId) {
+            renderAbilityEmpty('ログイン後に表示されます');
+            return;
+        }
+
+        try {
+            const players = await window.fbGetPlayers();
+            const playerId = resolveAbilityPlayerId(players, role, currentUserId);
+            if (!playerId) {
+                renderAbilityEmpty('選手を選択してください');
+                return;
+            }
+
+            const [trainingRecords, statsRecords] = await Promise.all([
+                window.fbGetRecords('trainingRecords', playerId),
+                window.fbGetRecords('statsRecords', playerId)
+            ]);
+            const player = players.find(item => item.id === playerId);
+            const rows = buildAbilityRows(trainingRecords, statsRecords);
+            renderAbility(rows, player?.name || '選手');
+            setTimeout(() => abilityChartInstance?.resize(), 0);
+        } catch (err) {
+            console.error('Failed to update my ability:', err);
+            renderAbilityEmpty('表示に失敗しました');
+        }
+    }
+    window.updateMyAbility = updateMyAbility;
 
     // Global action for read status
     window.markAsRead = async function(commentId) {
@@ -730,6 +2035,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 await updateDashboard();
                 await renderHistory();
+                if (document.getElementById('my-ability')?.classList.contains('active')) {
+                    await updateMyAbility();
+                }
             } catch (err) {
                 console.error(`Form submission failed for ${formId}:`, err);
                 alert('保存に失敗しました。');
@@ -811,14 +2119,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (role === 'master') {
             if (masterFilters) masterFilters.style.display = 'block';
             if (exportCsvBtn) exportCsvBtn.style.display = 'inline-block';
-            document.querySelectorAll('.master-only').forEach(el => el.style.display = 'block');
+            document.querySelectorAll('.master-only').forEach(el => {
+                if (el.matches('.tab-pane.master-only')) el.style.display = '';
+                else el.style.display = el.matches('.nav-links li') ? 'flex' : 'block';
+            });
             
             // Populate player filter if not already done
             loadPlayersForFilter();
+            renderItemSettings();
         } else {
             if (masterFilters) masterFilters.style.display = 'none';
             if (exportCsvBtn) exportCsvBtn.style.display = 'none';
             document.querySelectorAll('.master-only').forEach(el => el.style.display = 'none');
+            if (document.getElementById('item-settings')?.classList.contains('active')) {
+                document.querySelector('.nav-links li[data-tab="dashboard"]')?.click();
+            }
         }
 
         // Sidebar Profile
@@ -1787,28 +3102,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="form-group mb-3">
                     <label>種目</label>
                     <select id="edit-train-type" class="w-100" required>
-                        <option value="スクワット" ${rec.type === 'スクワット' ? 'selected' : ''}>スクワット</option>
-                        <option value="ベンチプレス" ${rec.type === 'ベンチプレス' ? 'selected' : ''}>ベンチプレス</option>
-                        <option value="ベンチプレス（ローテーションあり）" ${rec.type === 'ベンチプレス（ローテーションあり）' ? 'selected' : ''}>ベンチプレス（ローテーションあり）</option>
-                        <option value="ベンチプレス（ローテーションなし）" ${rec.type === 'ベンチプレス（ローテーションなし）' ? 'selected' : ''}>ベンチプレス（ローテーションなし）</option>
-                        <option value="ストレートバー" ${rec.type === 'ストレートバー' ? 'selected' : ''}>ストレートバー</option>
-                        <option value="ボックスジャンプ" ${rec.type === 'ボックスジャンプ' ? 'selected' : ''}>ボックスジャンプ</option>
-                        <option value="10m走" ${rec.type === '10m走' ? 'selected' : ''}>10m走</option>
-                        <option value="メディシンボールスロー2kg(前)" ${rec.type === 'メディシンボールスロー2kg(前)' ? 'selected' : ''}>メディシンボールスロー2kg(前)</option>
-                        <option value="メディシンボールスロー2kg(後ろ)" ${rec.type === 'メディシンボールスロー2kg(後ろ)' ? 'selected' : ''}>メディシンボールスロー2kg(後ろ)</option>
-                        <option value="メディシンボールスロー2kg(プッシュ)" ${rec.type === 'メディシンボールスロー2kg(プッシュ)' ? 'selected' : ''}>メディシンボールスロー2kg(プッシュ)</option>
-                        <option value="メディシンボールスロー2kg(サイド)" ${rec.type === 'メディシンボールスロー2kg(サイド)' ? 'selected' : ''}>メディシンボールスロー2kg(サイド)</option>
-                        <option value="メディシンボールスロー(前)" ${rec.type === 'メディシンボールスロー(前)' ? 'selected' : ''}>メディシンボールスロー(前)</option>
-                        <option value="メディシンボールスロー(後ろ)" ${rec.type === 'メディシンボールスロー(後ろ)' ? 'selected' : ''}>メディシンボールスロー(後ろ)</option>
-                        <option value="メディシンボールスロー(プッシュ)" ${rec.type === 'メディシンボールスロー(プッシュ)' ? 'selected' : ''}>メディシンボールスロー(プッシュ)</option>
-                        <option value="メディシンボールスロー(サイド)" ${rec.type === 'メディシンボールスロー(サイド)' ? 'selected' : ''}>メディシンボールスロー(サイド)</option>
-                        <option value="立幅" ${rec.type === '立幅' ? 'selected' : ''}>立幅</option>
-                        <option value="立ち三段" ${rec.type === '立ち三段' ? 'selected' : ''}>立ち三段</option>
-                        <option value="ペンタゴンクリーン" ${rec.type === 'ペンタゴンクリーン' ? 'selected' : ''}>ペンタゴンクリーン</option>
-                        <option value="フロントスクワット" ${rec.type === 'フロントスクワット' ? 'selected' : ''}>フロントスクワット</option>
-                        <option value="バックスクワット" ${rec.type === 'バックスクワット' ? 'selected' : ''}>バックスクワット</option>
-                        <option value="デッドリフト" ${rec.type === 'デッドリフト' ? 'selected' : ''}>デッドリフト</option>
-                        <option value="懸垂" ${rec.type === '懸垂' ? 'selected' : ''}>懸垂</option>
+                        ${buildItemTypeOptions('training', rec.type)}
                     </select>
                 </div>
                 <div class="form-group mb-3 row">
@@ -1839,12 +3133,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="form-group mb-3">
                     <label>項目</label>
                     <select id="edit-stat-type" class="w-100" required>
-                        <option value="球速 (km/h)" ${rec.type === '球速 (km/h)' ? 'selected' : ''}>球速 (km/h)</option>
-                        <option value="プルダウン (km/h)" ${rec.type === 'プルダウン (km/h)' ? 'selected' : ''}>プルダウン (km/h)</option>
-                        <option value="スイングスピード (km/h)" ${rec.type === 'スイングスピード (km/h)' ? 'selected' : ''}>スイングスピード (km/h)</option>
-                        <option value="50m走 (秒)" ${rec.type === '50m走 (秒)' ? 'selected' : ''}>50m走 (秒)</option>
-                        <option value="遠投 (m)" ${rec.type === '遠投 (m)' ? 'selected' : ''}>遠投 (m)</option>
-                        <option value="回転数 (rpm)" ${rec.type === '回転数 (rpm)' ? 'selected' : ''}>回転数 (rpm)</option>
+                        ${buildItemTypeOptions('stats', rec.type)}
                     </select>
                 </div>
                 <div class="form-group mb-3">
@@ -2190,6 +3479,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (debugStatus) debugStatus.textContent = "App Ready";
         
+        await loadItemSettings();
         await renderPlayerList();
         await updateSidebarProfile();
         await updateDashboard();

@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="styles.css?v=11">
+    <link rel="stylesheet" href="styles.css?v=13">
     <!-- Chart.js for graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Firebase SDK (Compat) -->
@@ -32,6 +32,9 @@
                 <li class="active" data-tab="dashboard">
                     <i class="fa-solid fa-chart-line"></i> <span class="nav-text-pc">ダッシュボード</span><span class="nav-text-mobile">ホーム</span>
                 </li>
+                <li data-tab="my-ability">
+                    <i class="fa-solid fa-gem"></i> <span class="nav-text-pc">マイアビリティ</span><span class="nav-text-mobile">能力</span>
+                </li>
                 <li data-tab="weight">
                     <i class="fa-solid fa-weight-scale"></i> <span class="nav-text-pc">体重・体組成</span><span class="nav-text-mobile">体重</span>
                 </li>
@@ -47,6 +50,9 @@
                 </li>
                 <li data-tab="ranking">
                     <i class="fa-solid fa-trophy"></i> <span class="nav-text-pc">ランキング</span><span class="nav-text-mobile">順位</span>
+                </li>
+                <li class="master-only" data-tab="item-settings" style="display:none;">
+                    <i class="fa-solid fa-sliders"></i> <span class="nav-text-pc">種目設定</span><span class="nav-text-mobile">設定</span>
                 </li>
                 <li data-tab="players"><i class="fa-solid fa-users"></i> <span class="nav-text-pc">選手管理</span><span class="nav-text-mobile">選手</span></li>
             </ul>
@@ -106,9 +112,24 @@
                         <div id="dashboard-comments-history" style="display: none;"></div>
                     </div>
 
+                    <div class="glass dashboard-period-panel">
+                        <label for="dash-filter-period">表示期間</label>
+                        <select id="dash-filter-period" class="glass-select">
+                            <option value="1week">1week</option>
+                            <option value="1month">1month</option>
+                            <option value="3months" selected>3months</option>
+                            <option value="6months">6months</option>
+                            <option value="all">全期間</option>
+                        </select>
+                    </div>
+
                     <!-- Master Dashboard Filters (Hidden by default) -->
-                    <div id="master-dash-filters" class="glass" style="display: none; padding: 20px; margin-bottom: 24px; border-radius: var(--border-radius);">
-                        <h3 style="margin-bottom: 16px; font-size: 1rem; color: var(--accent-orange);"><i class="fa-solid fa-filter"></i> マスター・表示フィルター</h3>
+                    <div id="master-dash-filters" class="glass dashboard-filter-panel" style="display: none;">
+                        <button type="button" id="toggle-master-dash-filters" class="dashboard-filter-toggle" aria-expanded="false">
+                            <span><i class="fa-solid fa-filter"></i> マスター・表示フィルター</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </button>
+                        <div id="master-dash-filter-body" class="dashboard-filter-body">
                         <div class="filter-controls" style="display: flex; gap: 16px; flex-wrap: wrap;">
                             <div class="filter-item" style="flex: 1; min-width: 150px;">
                                 <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">対象学年</label>
@@ -139,14 +160,6 @@
                                     <option value="内野手">内野手</option>
                                     <option value="外野手">外野手</option>
                                     <option value="スタッフ/その他">スタッフ/その他</option>
-                                </select>
-                            </div>
-                            <div class="filter-item" style="flex: 1; min-width: 150px;">
-                                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px;">集計期間</label>
-                                <select id="dash-filter-period" class="glass-select" style="width: 100%;">
-                                    <option value="daily">日次 (Daily)</option>
-                                    <option value="weekly">週次 (Weekly)</option>
-                                    <option value="monthly">月次 (Monthly)</option>
                                 </select>
                             </div>
                         </div>
@@ -187,54 +200,37 @@
                                 </div>
                             </div>
                         </div>
+                        </div>
                     </div>
 
-                    <div class="stats-grid">
+                    <div class="stats-grid dashboard-summary-grid">
                         <div class="stat-card glass hover-lift">
                             <div class="stat-header">
-                                <span>現在の体重</span>
+                                <span>体重 <small>直近3か月</small></span>
                                 <div class="icon-circle weight"><i class="fa-solid fa-weight-scale"></i></div>
                             </div>
-                            <h2><span id="dash-weight">--</span> <small>kg</small></h2>
-                            <span class="trend neutral" id="dash-weight-trend"><i class="fa-solid fa-minus"></i> データなし</span>
+                            <div class="metric-trio">
+                                <div><span>Max</span><strong id="dash-weight-max">--</strong><small>kg</small></div>
+                                <div><span>Ave</span><strong id="dash-weight-ave">--</strong><small>kg</small></div>
+                                <div><span>Growth rate</span><strong id="dash-weight-growth">--</strong><small>kg</small></div>
+                            </div>
                         </div>
                         <div class="stat-card glass hover-lift">
                             <div class="stat-header">
-                                <span>球速 (MAX)</span>
-                                <div class="icon-circle speed"><i class="fa-solid fa-fire"></i></div>
+                                <span>体脂肪率 <small>直近3か月</small></span>
+                                <div class="icon-circle body-fat"><i class="fa-solid fa-percent"></i></div>
                             </div>
-                            <h2><span id="dash-speed">--</span> <small>km/h</small></h2>
-                            <span class="trend neutral" id="dash-speed-trend"><i class="fa-solid fa-minus"></i> データなし</span>
-                        </div>
-                        <div class="stat-card glass hover-lift">
-                            <div class="stat-header">
-                                <span>スクワット (MAX)</span>
-                                <div class="icon-circle strength"><i class="fa-solid fa-dumbbell"></i></div>
+                            <div class="metric-trio">
+                                <div><span>Max</span><strong id="dash-bodyfat-max">--</strong><small>%</small></div>
+                                <div><span>Ave</span><strong id="dash-bodyfat-ave">--</strong><small>%</small></div>
+                                <div><span>Growth rate</span><strong id="dash-bodyfat-growth">--</strong><small>ポイント</small></div>
                             </div>
-                            <h2><span id="dash-squat">--</span> <small>kg</small></h2>
-                            <span class="trend neutral" id="dash-squat-trend"><i class="fa-solid fa-minus"></i> データなし</span>
-                        </div>
-                        <div class="stat-card glass hover-lift">
-                            <div class="stat-header">
-                                <span>単位仕事量 (重量/体重)</span>
-                                <div class="icon-circle ratio"><i class="fa-solid fa-divide"></i></div>
-                            </div>
-                            <h2><span id="dash-ratio">--</span></h2>
-                            <span class="trend neutral" id="dash-ratio-trend"><i class="fa-solid fa-minus"></i> データなし</span>
-                        </div>
-                        <div class="stat-card glass hover-lift">
-                            <div class="stat-header">
-                                <span>遠投</span>
-                                <div class="icon-circle throw"><i class="fa-solid fa-baseball-bat-ball"></i></div>
-                            </div>
-                            <h2><span id="dash-throw">--</span> <small>m</small></h2>
-                            <span class="trend neutral" id="dash-throw-trend"><i class="fa-solid fa-minus"></i> データなし</span>
                         </div>
                     </div>
 
                     <div class="mobile-graph-tabs">
                         <button class="graph-tab active" data-graph="weight">体重推移</button>
-                        <button class="graph-tab" data-graph="speed">球速推移</button>
+                        <button class="graph-tab" data-graph="bodyfat">体脂肪率推移</button>
                         <button class="graph-tab" data-graph="training">筋トレ推移</button>
                         <button class="graph-tab" data-graph="stats">野球指標</button>
                         <button class="graph-tab" data-graph="ratio">単位仕事量推移</button>
@@ -243,21 +239,21 @@
                     <div class="charts-container">
                         <div class="chart-card glass" id="graph-card-weight">
                             <div class="chart-header">
-                                <h3>体重・体脂肪率の推移</h3>
-                                <select class="chart-filter" id="weight-chart-range"><option value="3">過去3ヶ月</option><option value="6">過去6ヶ月</option><option value="12">過去1年</option></select>
+                                <h3>体重推移</h3>
                             </div>
                             <div class="canvas-wrapper">
                                 <canvas id="weightChart"></canvas>
                             </div>
+                            <div class="chart-value-strip" id="chart-values-weight"></div>
                         </div>
-                        <div class="chart-card glass" id="graph-card-speed">
+                        <div class="chart-card glass" id="graph-card-bodyfat">
                             <div class="chart-header">
-                                <h3>球速推移</h3>
-                                <select class="chart-filter" id="speed-chart-range"><option value="6">過去6ヶ月</option><option value="12">過去1年</option></select>
+                                <h3>体脂肪率推移</h3>
                             </div>
                             <div class="canvas-wrapper">
-                                <canvas id="pitchSpeedChart"></canvas>
+                                <canvas id="bodyFatChart"></canvas>
                             </div>
+                            <div class="chart-value-strip" id="chart-values-bodyfat"></div>
                         </div>
                         <div class="chart-card glass" id="graph-card-training">
                             <div class="chart-header">
@@ -276,6 +272,7 @@
                             <div class="canvas-wrapper">
                                 <canvas id="trainingChart"></canvas>
                             </div>
+                            <div class="chart-value-strip" id="chart-values-training"></div>
                         </div>
                         <div class="chart-card glass" id="graph-card-ratio">
                             <div class="chart-header">
@@ -285,6 +282,7 @@
                             <div class="canvas-wrapper">
                                 <canvas id="ratioChart"></canvas>
                             </div>
+                            <div class="chart-value-strip" id="chart-values-ratio"></div>
                         </div>
                         <div class="chart-card glass" id="graph-card-stats">
                             <div class="chart-header">
@@ -300,6 +298,68 @@
                             </div>
                             <div class="canvas-wrapper">
                                 <canvas id="statsChart"></canvas>
+                            </div>
+                            <div class="chart-value-strip" id="chart-values-stats"></div>
+                        </div>
+                    </div>
+                    <div class="glass dashboard-history-panel">
+                        <div class="dashboard-history-header">
+                            <div class="dashboard-history-title-group">
+                                <h3 id="dashboard-history-title">記録履歴</h3>
+                                <span id="dashboard-history-count">0件</span>
+                            </div>
+                            <div class="dashboard-history-controls">
+                                <label for="dashboard-history-type">履歴項目</label>
+                                <select class="chart-filter" id="dashboard-history-type">
+                                    <option value="weight">体重</option>
+                                    <option value="bodyfat">体脂肪率</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="dashboard-weekly-status" class="dashboard-weekly-status" style="display:none;"></div>
+                        <div id="dashboard-record-history" class="dashboard-record-history">
+                            <div class="dashboard-history-empty">表示できる記録がありません</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- My Ability Tab -->
+                <div id="my-ability" class="tab-pane fade-in">
+                    <div class="ability-layout">
+                        <div class="glass ability-chart-panel">
+                            <div class="ability-panel-header">
+                                <h2>マイアビリティ</h2>
+                                <div class="ability-player-control master-only" id="ability-player-control" style="display:none;">
+                                    <label for="ability-player-select">選手</label>
+                                    <select class="chart-filter" id="ability-player-select"></select>
+                                </div>
+                            </div>
+                            <div class="ability-chart-frame">
+                                <canvas id="abilityChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="glass ability-score-panel">
+                            <div class="ability-panel-header">
+                                <h3>属性スコア</h3>
+                                <span id="ability-player-name">--</span>
+                            </div>
+                            <div class="ability-table-wrap">
+                                <table class="ability-table">
+                                    <thead>
+                                        <tr>
+                                            <th>属性</th>
+                                            <th>現状</th>
+                                            <th>140km/h</th>
+                                            <th>到達率</th>
+                                            <th>反映項目</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ability-score-body">
+                                        <tr>
+                                            <td colspan="5" class="ability-empty">表示できる記録がありません</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -485,6 +545,86 @@
                 </div>
 
 
+                <!-- Item Settings Tab -->
+                <div id="item-settings" class="tab-pane fade-in master-only" style="display:none;">
+                    <div class="glass item-settings-panel">
+                        <div class="item-settings-header">
+                            <h2>種目設定</h2>
+                            <span id="item-settings-status">未保存</span>
+                        </div>
+                        <div class="item-settings-menu" role="tablist" aria-label="種目設定メニュー">
+                            <button type="button" class="item-kind-tab active" data-item-kind="training">
+                                <i class="fa-solid fa-dumbbell"></i> ウエイト
+                            </button>
+                            <button type="button" class="item-kind-tab" data-item-kind="stats">
+                                <i class="fa-solid fa-baseball"></i> 野球指標
+                            </button>
+                        </div>
+                        <div class="item-settings-grid">
+                            <div class="item-settings-list-wrap">
+                                <div class="item-settings-list-header">
+                                    <h3 id="item-settings-list-title">ウエイト種目</h3>
+                                    <button type="button" class="btn-outline" id="item-settings-new-btn">
+                                        <i class="fa-solid fa-plus"></i> 新規
+                                    </button>
+                                </div>
+                                <div id="item-settings-list" class="item-settings-list"></div>
+                            </div>
+                            <form id="item-setting-form" class="item-setting-form">
+                                <input type="hidden" id="item-setting-id">
+                                <div class="form-group">
+                                    <label id="item-setting-name-label">種目名</label>
+                                    <input type="text" id="item-setting-name" required>
+                                </div>
+                                <div class="form-group row">
+                                    <div class="col">
+                                        <label>属性</label>
+                                        <select id="item-setting-attribute" required>
+                                            <option value="burst">瞬発</option>
+                                            <option value="power">出力</option>
+                                            <option value="strength">筋力</option>
+                                            <option value="flexibility">柔軟性</option>
+                                        </select>
+                                    </div>
+                                    <div class="col">
+                                        <label>評価方向</label>
+                                        <select id="item-setting-direction" required>
+                                            <option value="higher">高いほど良い</option>
+                                            <option value="lower">低いほど良い</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group row">
+                                    <div class="col">
+                                        <label>140km/hライン</label>
+                                        <input type="number" id="item-setting-target80" step="0.01" required>
+                                    </div>
+                                    <div class="col">
+                                        <label>基準点</label>
+                                        <input type="number" id="item-setting-score80" step="1" min="1" max="100" value="80" required>
+                                    </div>
+                                    <div class="col">
+                                        <label>単位</label>
+                                        <input type="text" id="item-setting-unit" placeholder="kg">
+                                    </div>
+                                </div>
+                                <label class="item-setting-check">
+                                    <input type="checkbox" id="item-setting-active" checked>
+                                    <span>入力・グラフに表示</span>
+                                </label>
+                                <div class="item-setting-actions">
+                                    <button type="submit" class="btn-primary">
+                                        <i class="fa-solid fa-floppy-disk"></i> 保存
+                                    </button>
+                                    <button type="button" class="btn-outline" id="item-settings-delete-btn">
+                                        <i class="fa-solid fa-trash"></i> 削除
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Ranking Tab -->
                 <div id="ranking" class="tab-pane fade-in">
                     <div class="glass form-container" style="max-width: 800px; margin: 0 auto;">
@@ -547,6 +687,18 @@
 
             </div>
         </main>
+    </div>
+
+    <div id="dashboard-weekly-modal" class="modal-overlay" style="display:none;">
+        <div class="modal glass dashboard-weekly-modal">
+            <div class="dashboard-weekly-modal-header">
+                <h3 id="dashboard-weekly-modal-title">週の入力状況</h3>
+                <button type="button" class="dashboard-modal-close" onclick="window.closeDashboardWeekStatusModal()" aria-label="閉じる">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div id="dashboard-weekly-modal-body" class="dashboard-weekly-modal-body"></div>
+        </div>
     </div>
 
     <!-- Player Login / Registration Modal -->
@@ -758,7 +910,7 @@
     </div>
 
     <!-- The main UI logic is in app.js, which will now use window methods exposed by firebase-db.js -->
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=13"></script>
     <!-- Chat Modal Overlay -->
     <div id="chat-modal-overlay" class="modal-overlay" style="display:none;">
         <div class="modal glass chat-modal">
