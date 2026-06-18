@@ -242,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- Event Listeners ----------
 
     function isMedicineBallType(typeName) {
-        return /メディシンボール/.test(typeName || '');
+        return /メディシンボール|立幅|立ち三段/.test(typeName || '');
     }
 
     function getTrainingValueLabel(typeName) {
@@ -1840,6 +1840,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <label>項目</label>
                     <select id="edit-stat-type" class="w-100" required>
                         <option value="球速 (km/h)" ${rec.type === '球速 (km/h)' ? 'selected' : ''}>球速 (km/h)</option>
+                        <option value="プルダウン (km/h)" ${rec.type === 'プルダウン (km/h)' ? 'selected' : ''}>プルダウン (km/h)</option>
                         <option value="スイングスピード (km/h)" ${rec.type === 'スイングスピード (km/h)' ? 'selected' : ''}>スイングスピード (km/h)</option>
                         <option value="50m走 (秒)" ${rec.type === '50m走 (秒)' ? 'selected' : ''}>50m走 (秒)</option>
                         <option value="遠投 (m)" ${rec.type === '遠投 (m)' ? 'selected' : ''}>遠投 (m)</option>
