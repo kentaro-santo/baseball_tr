@@ -74,6 +74,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     window.ABILITY_CONFIG = ABILITY_CONFIG;
 
+    const ITEM_INPUT_MODES = {
+        weight: { label: '重量', unit: 'kg', placeholder: '例: 80', step: '0.01' },
+        distance: { label: '距離', unit: 'm', placeholder: '例: 8.75', step: '0.01' },
+        count: { label: '回数', unit: '回', placeholder: '例: 12', step: '1' },
+        rating4: { label: '4段評価', unit: '段階', placeholder: '1〜4', step: '1', min: '1', max: '4' },
+        none: { label: '不採用', unit: '', placeholder: '', step: '1' }
+    };
+
     // ---------- Global Helpers ----------
     /**
      * Aggregates time-series data based on period (Daily/Weekly/Monthly)
@@ -204,21 +212,60 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${source}:${normalized || Date.now()}`;
     }
 
+    function inferInputMode(source, name, unit = '') {
+        const typeName = String(name || '');
+        const normalizedUnit = String(unit || '').toLowerCase();
+        if (/4段|段階|評価/.test(typeName) || /段階/.test(unit)) return 'rating4';
+        if (/回数|懸垂/.test(typeName) || /回|rep/.test(normalizedUnit)) return 'count';
+        if (/m|cm|距離|飛距離|走|立幅|三段|メディシン/.test(typeName) || /m|cm/.test(normalizedUnit)) return 'distance';
+        if (source === 'training') return 'weight';
+        return normalizedUnit === 'kg' ? 'weight' : 'distance';
+    }
+
+    function getInputModeConfig(mode) {
+        return ITEM_INPUT_MODES[mode] || ITEM_INPUT_MODES.weight;
+    }
+
+    function getDefinitionDefaultUnit(source, name, unit, inputMode) {
+        if (unit) return unit;
+        const modeConfig = getInputModeConfig(inputMode);
+        if (modeConfig.unit) return modeConfig.unit;
+        const rule = getAbilityRule(source, name);
+        return rule.unit || '';
+    }
+
+    function getDefaultNormalizeMax(target80, score80) {
+        const target = Number(target80);
+        const score = Number(score80);
+        if (!Number.isFinite(target) || !Number.isFinite(score) || target <= 0 || score <= 0) return '';
+        return Number((target * (100 / score)).toFixed(2));
+    }
+
     function normalizeItemDefinition(source, item, index = 0) {
         const name = String(item?.name || item?.label || item?.value || '').trim();
         const rule = getAbilityRule(source, name);
-        const unit = item?.unit ?? getAbilityUnit(source, name, rule);
+        const inputMode = item?.inputMode || inferInputMode(source, name, item?.unit ?? rule.unit ?? '');
+        const score80 = Number(item?.score80 ?? rule.score80 ?? ABILITY_CONFIG.targetLineScore);
+        const target80 = Number(item?.target80 ?? rule.target80 ?? 80);
+        const unit = getDefinitionDefaultUnit(source, name, item?.unit ?? rule.unit ?? '', inputMode);
+        const normalizeMin = item?.normalizeMin ?? '';
+        const normalizeMax = item?.normalizeMax ?? '';
         return {
             id: item?.id || createItemId(source, name),
             source,
             name,
             label: String(item?.label || name).trim(),
             attribute: item?.attribute || rule.attribute || 'power',
-            target80: Number(item?.target80 ?? rule.target80 ?? 80),
-            score80: Number(item?.score80 ?? rule.score80 ?? ABILITY_CONFIG.targetLineScore),
+            target80,
+            score80,
             direction: item?.direction || rule.direction || 'higher',
             unit: unit || '',
-            active: item?.active !== false,
+            inputMode,
+            scoreMethod: item?.scoreMethod || 'max',
+            normalizationMode: item?.normalizationMode || 'target',
+            normalizeMin: normalizeMin === '' || normalizeMin === null || normalizeMin === undefined ? '' : Number(normalizeMin),
+            normalizeMax: normalizeMax === '' || normalizeMax === null || normalizeMax === undefined ? getDefaultNormalizeMax(target80, score80) : Number(normalizeMax),
+            active: inputMode !== 'none' && item?.active !== false,
             sortOrder: Number(item?.sortOrder ?? index)
         };
     }
@@ -323,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         DASHBOARD_DEFINITIONS.statTypes = getDefinitionOptions('stats');
         populateDashboardHistorySelect(DASHBOARD_DEFINITIONS.trainingTypes, DASHBOARD_DEFINITIONS.statTypes);
         updateTrainingInputMode(document.getElementById('train-type')?.value || '');
+        updateStatsInputMode(document.getElementById('stat-type')?.value || '');
     }
 
     function populateDashboardHistorySelect(trainingTypes, statTypes) {
@@ -442,7 +490,10 @@ document.addEventListener('DOMContentLoaded', () => {
             target80: source === 'stats' ? 140 : 100,
             score80: ABILITY_CONFIG.targetLineScore,
             direction: 'higher',
-            unit: source === 'training' ? 'kg' : ''
+            unit: source === 'training' ? 'kg' : '',
+            inputMode: source === 'training' ? 'weight' : 'distance',
+            scoreMethod: 'max',
+            normalizationMode: 'target'
         });
 
         const next = item || fallback;
@@ -455,14 +506,34 @@ document.addEventListener('DOMContentLoaded', () => {
         setValue('item-setting-name', item?.name || '');
         setValue('item-setting-attribute', next.attribute);
         setValue('item-setting-direction', next.direction);
+        setValue('item-setting-input-mode', next.inputMode);
+        setValue('item-setting-score-method', next.scoreMethod);
+        setValue('item-setting-normalization-mode', next.normalizationMode);
         setValue('item-setting-target80', next.target80);
         setValue('item-setting-score80', next.score80);
         setValue('item-setting-unit', next.unit);
+        setValue('item-setting-normalize-min', next.normalizeMin);
+        setValue('item-setting-normalize-max', next.normalizeMax);
 
         const active = document.getElementById('item-setting-active');
         if (active) active.checked = next.active !== false;
         const deleteBtn = document.getElementById('item-settings-delete-btn');
         if (deleteBtn) deleteBtn.disabled = !item;
+    }
+
+    function syncItemInputModeFields() {
+        const mode = document.getElementById('item-setting-input-mode')?.value || 'weight';
+        const unitInput = document.getElementById('item-setting-unit');
+        const activeInput = document.getElementById('item-setting-active');
+        const modeConfig = getInputModeConfig(mode);
+        const knownUnits = new Set(Object.values(ITEM_INPUT_MODES).map(config => config.unit).filter(Boolean));
+
+        if (unitInput && modeConfig.unit && (!unitInput.value || knownUnits.has(unitInput.value))) {
+            unitInput.value = modeConfig.unit;
+        }
+        if (activeInput && mode === 'none') {
+            activeInput.checked = false;
+        }
     }
 
     function renderItemSettings() {
@@ -497,9 +568,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <button type="button" class="item-settings-row ${item.id === selectedId ? 'active' : ''}" data-item-id="${escapeHtml(item.id)}">
                 <span>
                     <strong>${escapeHtml(item.label || item.name)}</strong>
-                    <small>${escapeHtml(getAttributeLabel(item.attribute))} / ${escapeHtml(item.direction === 'lower' ? '低いほど良い' : '高いほど良い')}</small>
+                    <small>${escapeHtml(getAttributeLabel(item.attribute))} / ${escapeHtml(item.direction === 'lower' ? '低いほど良い' : '高いほど良い')} / ${escapeHtml(item.scoreMethod === 'average' ? 'Ave' : 'Max')}</small>
                 </span>
-                <em>${escapeHtml(item.target80)}${escapeHtml(item.unit)} = ${escapeHtml(item.score80)}点</em>
+                <em>${escapeHtml(getInputModeConfig(item.inputMode).label)} / ${escapeHtml(item.target80)}${escapeHtml(item.unit)} = ${escapeHtml(item.score80)}点</em>
                 ${item.active === false ? '<i class="fa-solid fa-eye-slash" title="非表示"></i>' : ''}
             </button>
         `).join('');
@@ -516,11 +587,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const unit = document.getElementById('item-setting-unit')?.value.trim() || '';
         const attribute = document.getElementById('item-setting-attribute')?.value || 'power';
         const direction = document.getElementById('item-setting-direction')?.value || 'higher';
-        const active = document.getElementById('item-setting-active')?.checked !== false;
+        const inputMode = document.getElementById('item-setting-input-mode')?.value || 'weight';
+        const scoreMethod = document.getElementById('item-setting-score-method')?.value || 'max';
+        const normalizationMode = document.getElementById('item-setting-normalization-mode')?.value || 'target';
+        const normalizeMinRaw = document.getElementById('item-setting-normalize-min')?.value;
+        const normalizeMaxRaw = document.getElementById('item-setting-normalize-max')?.value;
+        const normalizeMin = normalizeMinRaw === '' ? '' : Number(normalizeMinRaw);
+        const normalizeMax = normalizeMaxRaw === '' ? '' : Number(normalizeMaxRaw);
+        const active = inputMode !== 'none' && document.getElementById('item-setting-active')?.checked !== false;
 
         if (!name) throw new Error('名称を入力してください。');
         if (!Number.isFinite(target80) || target80 <= 0) throw new Error('140km/hラインは正の数値で入力してください。');
         if (!Number.isFinite(score80) || score80 <= 0 || score80 > 100) throw new Error('基準点は1〜100で入力してください。');
+        if (normalizationMode === 'manual') {
+            if (!Number.isFinite(normalizeMin) || !Number.isFinite(normalizeMax) || normalizeMin === normalizeMax) {
+                throw new Error('手動正規化では1点ラインと100点ラインに異なる数値を入力してください。');
+            }
+        }
 
         return normalizeItemDefinition(currentItemSettingsKind, {
             id: id || `${currentItemSettingsKind}:${Date.now()}`,
@@ -531,6 +614,11 @@ document.addEventListener('DOMContentLoaded', () => {
             score80,
             direction,
             unit,
+            inputMode,
+            scoreMethod,
+            normalizationMode,
+            normalizeMin,
+            normalizeMax,
             active
         });
     }
@@ -846,28 +934,43 @@ document.addEventListener('DOMContentLoaded', () => {
         return /メディシンボール/.test(typeName || '');
     }
 
+    function getRecordInputConfig(source, typeName) {
+        const definition = itemDefinitionsState ? getItemDefinition(source, typeName) : null;
+        const mode = definition?.inputMode || inferInputMode(source, typeName, definition?.unit || '');
+        const modeConfig = getInputModeConfig(mode);
+        const unit = definition?.unit || modeConfig.unit || '';
+        const label = mode === 'distance' && unit && !/^(m|cm)$/.test(unit) ? '記録' : modeConfig.label;
+        return {
+            mode,
+            label,
+            unit,
+            placeholder: modeConfig.placeholder,
+            step: modeConfig.step,
+            min: modeConfig.min || '',
+            max: modeConfig.max || ''
+        };
+    }
+
     function getTrainingValueLabel(typeName) {
-        const configuredUnit = itemDefinitionsState ? getItemDefinition('training', typeName)?.unit : '';
-        if (configuredUnit && configuredUnit !== 'kg') return `記録 (${configuredUnit})`;
-        return isMedicineBallType(typeName) ? '飛距離 (m)' : '重量 (kg)';
+        const config = getRecordInputConfig('training', typeName);
+        return `${config.label}${config.unit ? ` (${config.unit})` : ''}`;
     }
 
     function getTrainingValueUnit(typeName) {
-        const configuredUnit = itemDefinitionsState ? getItemDefinition('training', typeName)?.unit : '';
-        if (configuredUnit) return configuredUnit;
-        return isMedicineBallType(typeName) ? 'm' : 'kg';
+        return getRecordInputConfig('training', typeName).unit;
     }
 
     function formatTrainingRecordLabel(record) {
         const unit = getTrainingValueUnit(record.type);
-        if (isMedicineBallType(record.type)) {
+        if (getRecordInputConfig('training', record.type).mode !== 'weight') {
             return `${record.date} - ${record.type}: ${record.weight}${unit}`;
         }
         return `${record.date} - ${record.type}: ${record.weight}${unit} x ${record.reps}回 x ${record.sets}セット`;
     }
 
     function updateTrainingInputMode(typeName) {
-        const isDistance = isMedicineBallType(typeName);
+        const config = getRecordInputConfig('training', typeName);
+        const isSingleValueMode = config.mode !== 'weight';
         const label = document.getElementById('train-value-label');
         const valueInput = document.getElementById('train-weight');
         const repsCol = document.getElementById('train-reps-col');
@@ -876,19 +979,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const setsInput = document.getElementById('train-sets');
 
         if (label) label.textContent = getTrainingValueLabel(typeName);
-        if (valueInput) valueInput.placeholder = isDistance ? '例: 8.75' : '例: 80';
-        if (repsCol) repsCol.style.display = isDistance ? 'none' : '';
-        if (setsCol) setsCol.style.display = isDistance ? 'none' : '';
-        if (repsInput) repsInput.required = !isDistance;
-        if (setsInput) setsInput.required = !isDistance;
-        if (isDistance) {
+        if (valueInput) {
+            valueInput.placeholder = config.placeholder;
+            valueInput.step = config.step;
+            valueInput.min = config.min;
+            valueInput.max = config.max;
+        }
+        if (repsCol) repsCol.style.display = isSingleValueMode ? 'none' : '';
+        if (setsCol) setsCol.style.display = isSingleValueMode ? 'none' : '';
+        if (repsInput) repsInput.required = !isSingleValueMode;
+        if (setsInput) setsInput.required = !isSingleValueMode;
+        if (isSingleValueMode) {
             if (repsInput) repsInput.value = '1';
             if (setsInput) setsInput.value = '1';
         }
     }
 
     function updateEditTrainingInputMode(typeName) {
-        const isDistance = isMedicineBallType(typeName);
+        const config = getRecordInputConfig('training', typeName);
+        const isSingleValueMode = config.mode !== 'weight';
         const label = document.getElementById('edit-train-value-label');
         const valueInput = document.getElementById('edit-train-weight');
         const repsCol = document.getElementById('edit-train-reps-col');
@@ -897,14 +1006,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const setsInput = document.getElementById('edit-train-sets');
 
         if (label) label.textContent = getTrainingValueLabel(typeName);
-        if (valueInput) valueInput.placeholder = isDistance ? '例: 8.75' : '';
-        if (repsCol) repsCol.style.display = isDistance ? 'none' : '';
-        if (setsCol) setsCol.style.display = isDistance ? 'none' : '';
-        if (repsInput) repsInput.required = !isDistance;
-        if (setsInput) setsInput.required = !isDistance;
-        if (isDistance) {
+        if (valueInput) {
+            valueInput.placeholder = config.placeholder;
+            valueInput.step = config.step;
+            valueInput.min = config.min;
+            valueInput.max = config.max;
+        }
+        if (repsCol) repsCol.style.display = isSingleValueMode ? 'none' : '';
+        if (setsCol) setsCol.style.display = isSingleValueMode ? 'none' : '';
+        if (repsInput) repsInput.required = !isSingleValueMode;
+        if (setsInput) setsInput.required = !isSingleValueMode;
+        if (isSingleValueMode) {
             if (repsInput) repsInput.value = repsInput.value || '1';
             if (setsInput) setsInput.value = setsInput.value || '1';
+        }
+    }
+
+    function updateStatsInputMode(typeName) {
+        const config = getRecordInputConfig('stats', typeName);
+        const label = document.querySelector('label[for="stat-val"]') || document.getElementById('stat-val')?.closest('.form-group')?.querySelector('label');
+        const input = document.getElementById('stat-val');
+        if (label) label.textContent = `記録数値${config.unit ? ` (${config.unit})` : ''}`;
+        if (input) {
+            input.placeholder = config.placeholder || '数値を入力';
+            input.step = config.step;
+            input.min = config.min;
+            input.max = config.max;
+        }
+    }
+
+    function updateEditStatsInputMode(typeName) {
+        const config = getRecordInputConfig('stats', typeName);
+        const input = document.getElementById('edit-stat-val');
+        const label = input?.closest('.form-group')?.querySelector('label');
+        if (label) label.textContent = `記録数値${config.unit ? ` (${config.unit})` : ''}`;
+        if (input) {
+            input.placeholder = config.placeholder || '数値を入力';
+            input.step = config.step;
+            input.min = config.min;
+            input.max = config.max;
         }
     }
 
@@ -920,6 +1060,20 @@ document.addEventListener('DOMContentLoaded', () => {
             setFilterOpen(localStorage.getItem('masterDashFiltersOpen') === 'true');
             masterFilterToggle.addEventListener('click', () => {
                 setFilterOpen(!masterFilterPanel.classList.contains('is-open'));
+            });
+        }
+
+        const abilityFilterPanel = document.getElementById('master-ability-filters');
+        const abilityFilterToggle = document.getElementById('toggle-master-ability-filters');
+        if (abilityFilterPanel && abilityFilterToggle) {
+            const setAbilityFilterOpen = (isOpen) => {
+                abilityFilterPanel.classList.toggle('is-open', isOpen);
+                abilityFilterToggle.setAttribute('aria-expanded', String(isOpen));
+                localStorage.setItem('masterAbilityFiltersOpen', String(isOpen));
+            };
+            setAbilityFilterOpen(localStorage.getItem('masterAbilityFiltersOpen') === 'true');
+            abilityFilterToggle.addEventListener('click', () => {
+                setAbilityFilterOpen(!abilityFilterPanel.classList.contains('is-open'));
             });
         }
 
@@ -956,9 +1110,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        document.getElementById('ability-player-select')?.addEventListener('change', (event) => {
-            localStorage.setItem('abilityPlayerId', event.target.value);
-            updateMyAbility();
+        const abilityFilterIds = [
+            'ability-filter-grade', 'ability-filter-player', 'ability-filter-position', 'ability-filter-period',
+            'ability-exclude-grade', 'ability-exclude-position', 'ability-exclude-player'
+        ];
+        abilityFilterIds.forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => {
+                if (id === 'ability-filter-player') {
+                    localStorage.setItem('abilityPlayerId', document.getElementById(id).value);
+                }
+                updateMyAbility();
+            });
         });
 
         document.querySelectorAll('.item-kind-tab').forEach(tab => {
@@ -982,6 +1144,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('item-settings-new-btn')?.addEventListener('click', () => {
             fillItemSettingForm();
             document.getElementById('item-setting-name')?.focus();
+        });
+
+        document.getElementById('item-setting-input-mode')?.addEventListener('change', () => {
+            syncItemInputModeFields();
         });
 
         document.getElementById('item-setting-form')?.addEventListener('submit', async (event) => {
@@ -1063,6 +1229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('stat-type')?.addEventListener('change', (e) => {
             const group = document.getElementById('stat-other-memo-group');
             if (group) group.style.display = e.target.value === 'その他' ? 'block' : 'none';
+            updateStatsInputMode(e.target.value);
         });
     }
 
@@ -1132,6 +1299,31 @@ document.addEventListener('DOMContentLoaded', () => {
             filters.exclude.position = document.getElementById('dash-exclude-position')?.value || 'none';
             filters.exclude.playerId = document.getElementById('dash-exclude-player')?.value || 'none';
         }
+        return filters;
+    }
+
+    function getAbilityFilters(role, currentUserId) {
+        const filters = {
+            grade: 'all',
+            position: 'all',
+            playerId: currentUserId,
+            period: document.getElementById('ability-filter-period')?.value || DASHBOARD_DEFINITIONS.defaults.period,
+            exclude: {
+                grade: 'none',
+                position: 'none',
+                playerId: 'none'
+            }
+        };
+
+        if (role === 'master') {
+            filters.grade = document.getElementById('ability-filter-grade')?.value || 'all';
+            filters.position = document.getElementById('ability-filter-position')?.value || 'all';
+            filters.playerId = document.getElementById('ability-filter-player')?.value || 'all';
+            filters.exclude.grade = document.getElementById('ability-exclude-grade')?.value || 'none';
+            filters.exclude.position = document.getElementById('ability-exclude-position')?.value || 'none';
+            filters.exclude.playerId = document.getElementById('ability-exclude-player')?.value || 'none';
+        }
+
         return filters;
     }
 
@@ -1272,7 +1464,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 5. Ratio Chart
         if (ratioChartInstance) {
-            if (isMedicineBallType(trainingType)) {
+            if (getRecordInputConfig('training', trainingType).mode !== 'weight') {
                 ratioChartInstance.data.labels = [];
                 ratioChartInstance.data.datasets[0].data = [];
                 ratioChartInstance.update();
@@ -1423,7 +1615,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const trainingType = historySelection.type;
             title = historySelection.title;
 
-            if (!isMedicineBallType(trainingType)) {
+            if (getRecordInputConfig('training', trainingType).mode === 'weight') {
                 const sortedWeights = [...scopedWeights].sort((a, b) => new Date(a.date) - new Date(b.date));
                 rows = scopedTraining
                     .filter(record => record.type === trainingType)
@@ -1747,7 +1939,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 target80: managedDefinition.target80,
                 score80: managedDefinition.score80,
                 direction: managedDefinition.direction,
-                unit: managedDefinition.unit
+                unit: managedDefinition.unit,
+                scoreMethod: managedDefinition.scoreMethod,
+                normalizationMode: managedDefinition.normalizationMode,
+                normalizeMin: managedDefinition.normalizeMin,
+                normalizeMax: managedDefinition.normalizeMax
             };
         }
 
@@ -1769,7 +1965,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return ABILITY_CONFIG.fallback[source] || ABILITY_CONFIG.fallback.stats;
     }
 
-    function getAbilityLatestRecords(records, source) {
+    function aggregateAbilityValue(values, method, direction) {
+        if (!values.length) return null;
+        if (method === 'average') {
+            return values.reduce((sum, value) => sum + value, 0) / values.length;
+        }
+        return direction === 'lower' ? Math.min(...values) : Math.max(...values);
+    }
+
+    function getAbilityMetricRecords(records, source) {
         const valueKey = source === 'training' ? 'weight' : 'value';
         const byType = new Map();
 
@@ -1777,15 +1981,46 @@ document.addEventListener('DOMContentLoaded', () => {
             const type = record.type || record.otherMemo || '';
             const value = Number(record[valueKey]);
             if (!type || !Number.isFinite(value)) return;
-
-            const dateValue = new Date(record.date || 0).getTime();
-            const current = byType.get(type);
-            if (!current || dateValue >= current.dateValue) {
-                byType.set(type, { ...record, source, value, dateValue });
-            }
+            if (!byType.has(type)) byType.set(type, []);
+            byType.get(type).push({ ...record, source, value });
         });
 
-        return Array.from(byType.values());
+        return getActiveItemDefinitions(source)
+            .filter(item => item.inputMode !== 'none')
+            .map(item => {
+                const itemRecords = byType.get(item.name) || [];
+                const values = itemRecords.map(record => record.value).filter(value => Number.isFinite(value));
+                if (!values.length) return null;
+                const rule = getAbilityRule(source, item.name);
+                return {
+                    source,
+                    type: item.name,
+                    value: aggregateAbilityValue(values, item.scoreMethod, rule.direction),
+                    count: values.length,
+                    scoreMethod: item.scoreMethod
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function calculateAbilityScore(value, rule) {
+        const target80 = Number(rule.target80);
+        const targetScore = Number(rule.score80 || ABILITY_CONFIG.targetLineScore);
+
+        if (rule.normalizationMode === 'manual') {
+            const minValue = Number(rule.normalizeMin);
+            const maxValue = Number(rule.normalizeMax);
+            if (Number.isFinite(minValue) && Number.isFinite(maxValue) && minValue !== maxValue) {
+                const ratio = (Number(value) - minValue) / (maxValue - minValue);
+                return Math.max(1, Math.min(100, Math.round(1 + ratio * 99)));
+            }
+        }
+
+        if (!Number.isFinite(target80) || target80 <= 0 || !Number.isFinite(targetScore)) return null;
+        const rawScore = rule.direction === 'lower'
+            ? (target80 / value) * targetScore
+            : (value / target80) * targetScore;
+        return Math.max(1, Math.min(100, Math.round(rawScore)));
     }
 
     function formatAbilityValue(value, unit) {
@@ -1806,29 +2041,25 @@ document.addEventListener('DOMContentLoaded', () => {
             { ...attribute, score: null, metrics: [] }
         ]));
         const records = [
-            ...getAbilityLatestRecords(trainingRecords, 'training'),
-            ...getAbilityLatestRecords(statsRecords, 'stats')
+            ...getAbilityMetricRecords(trainingRecords, 'training'),
+            ...getAbilityMetricRecords(statsRecords, 'stats')
         ];
 
         records.forEach(record => {
             const rule = getAbilityRule(record.source, record.type);
-            const target80 = Number(rule.target80);
-            if (!Number.isFinite(target80) || target80 <= 0) return;
-
             const targetScore = Number(rule.score80 || ABILITY_CONFIG.targetLineScore);
-            const rawScore = rule.direction === 'lower'
-                ? (target80 / record.value) * targetScore
-                : (record.value / target80) * targetScore;
-            const score = Math.max(1, Math.min(100, Math.round(rawScore)));
+            const score = calculateAbilityScore(record.value, rule);
+            if (score === null) return;
             const unit = getAbilityUnit(record.source, record.type, rule);
             const attribute = attributeMap.get(rule.attribute) || attributeMap.get('power');
 
             attribute.metrics.push({
                 type: record.type,
-                date: record.date,
                 value: record.value,
                 unit,
                 targetScore,
+                count: record.count,
+                scoreMethod: record.scoreMethod,
                 score
             });
         });
@@ -1886,7 +2117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         body.innerHTML = rows.map(row => {
             const metricLabels = row.metrics
                 .slice(0, 3)
-                .map(metric => `${metric.type} ${formatAbilityValue(metric.value, metric.unit)}`);
+                .map(metric => `${metric.type} ${metric.scoreMethod === 'average' ? 'Ave' : 'Max'} ${formatAbilityValue(metric.value, metric.unit)}`);
             const extraCount = row.metrics.length - metricLabels.length;
             const itemsLabel = metricLabels.length
                 ? `${metricLabels.join(' / ')}${extraCount > 0 ? ` 他${extraCount}` : ''}`
@@ -1955,20 +2186,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
+            if (role === 'master') {
+                await loadPlayersForAbilityFilter();
+            }
+            const filters = getAbilityFilters(role, currentUserId);
+            const dbQueryId = (role === 'master' && filters.playerId === 'all') ? null : filters.playerId;
             const players = await window.fbGetPlayers();
-            const playerId = resolveAbilityPlayerId(players, role, currentUserId);
-            if (!playerId) {
+            if (!dbQueryId && role !== 'master') {
                 renderAbilityEmpty('選手を選択してください');
                 return;
             }
 
             const [trainingRecords, statsRecords] = await Promise.all([
-                window.fbGetRecords('trainingRecords', playerId),
-                window.fbGetRecords('statsRecords', playerId)
+                window.fbGetRecords('trainingRecords', dbQueryId),
+                window.fbGetRecords('statsRecords', dbQueryId)
             ]);
-            const player = players.find(item => item.id === playerId);
-            const rows = buildAbilityRows(trainingRecords, statsRecords);
-            renderAbility(rows, player?.name || '選手');
+            const abilityPlayers = role === 'master'
+                ? players.filter(player => (player.role || 'player') !== 'master')
+                : players;
+            const filteredData = applyDashboardCriteria({
+                allWeights: [],
+                allStats: statsRecords,
+                allTraining: trainingRecords
+            }, abilityPlayers, filters, role);
+            const scopedTraining = filterRecordsByDashboardPeriod(filteredData.allTraining, filters.period);
+            const scopedStats = filterRecordsByDashboardPeriod(filteredData.allStats, filters.period);
+            const rows = buildAbilityRows(scopedTraining, scopedStats);
+            const summaryEl = document.getElementById('ability-filter-summary');
+            const targetPlayers = filteredData.targetPlayers || [];
+            const player = targetPlayers[0] || players.find(item => item.id === currentUserId);
+            const displayName = role === 'master'
+                ? (filters.playerId === 'all' ? `対象 ${targetPlayers.length}人` : (player?.name || '選手'))
+                : (player?.name || '自分の記録');
+
+            if (summaryEl) {
+                summaryEl.textContent = role === 'master'
+                    ? `${displayName} / ${filters.period}`
+                    : `自分の記録 / ${filters.period}`;
+            }
+            renderAbility(rows, displayName);
             setTimeout(() => abilityChartInstance?.resize(), 0);
         } catch (err) {
             console.error('Failed to update my ability:', err);
@@ -2027,10 +2283,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (setsInput) setsInput.value = 3;
                     const memoGroup = document.getElementById('train-other-memo-group');
                     if (memoGroup) memoGroup.style.display = 'none';
+                    updateTrainingInputMode(document.getElementById('train-type')?.value || '');
                 }
                 if (formId === 'stats-form') {
                     const memoGroup = document.getElementById('stat-other-memo-group');
                     if (memoGroup) memoGroup.style.display = 'none';
+                    updateStatsInputMode(document.getElementById('stat-type')?.value || '');
                 }
 
                 await updateDashboard();
@@ -2060,16 +2318,20 @@ document.addEventListener('DOMContentLoaded', () => {
         memo: document.getElementById('weight-memo').value
     }), '体重記録を保存しました！');
 
-    handleFormSubmit('training-form', 'trainingRecords', () => ({
-        date: document.getElementById('train-date').value,
-        type: document.getElementById('train-type').value,
-        weight: parseFloat(document.getElementById('train-weight').value),
-        reps: isMedicineBallType(document.getElementById('train-type').value) ? 1 : parseInt(document.getElementById('train-reps').value),
-        sets: isMedicineBallType(document.getElementById('train-type').value) ? 1 : parseInt(document.getElementById('train-sets').value),
-        otherMemo: document.getElementById('train-type').value === 'その他'
-            ? document.getElementById('train-other-memo').value
-            : ''
-    }), 'トレーニング記録を保存しました！');
+    handleFormSubmit('training-form', 'trainingRecords', () => {
+        const typeName = document.getElementById('train-type').value;
+        const isSingleValueMode = getRecordInputConfig('training', typeName).mode !== 'weight';
+        return {
+            date: document.getElementById('train-date').value,
+            type: typeName,
+            weight: parseFloat(document.getElementById('train-weight').value),
+            reps: isSingleValueMode ? 1 : parseInt(document.getElementById('train-reps').value),
+            sets: isSingleValueMode ? 1 : parseInt(document.getElementById('train-sets').value),
+            otherMemo: typeName === 'その他'
+                ? document.getElementById('train-other-memo').value
+                : ''
+        };
+    }, 'トレーニング記録を保存しました！');
 
     handleFormSubmit('stats-form', 'statsRecords', () => ({
         date: document.getElementById('stat-date').value,
@@ -2126,6 +2388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Populate player filter if not already done
             loadPlayersForFilter();
+            loadPlayersForAbilityFilter();
             renderItemSettings();
         } else {
             if (masterFilters) masterFilters.style.display = 'none';
@@ -2198,6 +2461,60 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } finally {
             isFilterLoading = false;
+        }
+    }
+
+    async function loadPlayersForAbilityFilter() {
+        const playerSelect = document.getElementById('ability-filter-player');
+        const excludeSelect = document.getElementById('ability-exclude-player');
+        if (!playerSelect) return;
+
+        const players = await loadPlayers();
+        const uniqueMap = new Map();
+        players.forEach(player => {
+            if ((player.role || 'player') === 'master') return;
+            const key = `${player.name}-${player.grade}-${player.id}`;
+            if (!uniqueMap.has(key)) uniqueMap.set(key, player);
+        });
+        const uniquePlayers = Array.from(uniqueMap.values())
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
+
+        const currentValue = playerSelect.value || localStorage.getItem('abilityPlayerId') || 'all';
+        const renderOptions = (targetPlayers) => {
+            playerSelect.innerHTML = '';
+            playerSelect.appendChild(new Option('全選手', 'all'));
+            targetPlayers.forEach(player => {
+                playerSelect.appendChild(new Option(`${player.name} (${player.grade || '-'})`, player.id));
+            });
+            if (Array.from(playerSelect.options).some(option => option.value === currentValue)) {
+                playerSelect.value = currentValue;
+            }
+        };
+
+        renderOptions(uniquePlayers);
+
+        const searchInput = document.getElementById('ability-filter-player-search');
+        if (searchInput && searchInput.dataset.bound !== 'true') {
+            searchInput.dataset.bound = 'true';
+            searchInput.addEventListener('input', () => {
+                const term = searchInput.value.trim().toLowerCase();
+                const filtered = term
+                    ? uniquePlayers.filter(player => (player.name || '').toLowerCase().includes(term))
+                    : uniquePlayers;
+                renderOptions(filtered);
+            });
+        }
+
+        if (excludeSelect) {
+            const currentExclude = excludeSelect.value || 'none';
+            excludeSelect.innerHTML = '';
+            excludeSelect.appendChild(new Option('なし', 'none'));
+            uniquePlayers.forEach(player => {
+                excludeSelect.appendChild(new Option(`${player.name} (${player.grade || '-'})`, player.id));
+            });
+            if (Array.from(excludeSelect.options).some(option => option.value === currentExclude)) {
+                excludeSelect.value = currentExclude;
+            }
         }
     }
 
@@ -3141,6 +3458,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="number" step="0.01" id="edit-stat-val" value="${rec.value}" class="w-100" required>
                 </div>
             `;
+            setTimeout(() => {
+                updateEditStatsInputMode(rec.type);
+                document.getElementById('edit-stat-type')?.addEventListener('change', (e) => updateEditStatsInputMode(e.target.value));
+            }, 0);
         }
 
         document.getElementById('edit-record-modal').style.display = 'flex';
@@ -3186,8 +3507,9 @@ document.addEventListener('DOMContentLoaded', () => {
             updatedData.date = document.getElementById('edit-train-date').value;
             updatedData.type = document.getElementById('edit-train-type').value;
             updatedData.weight = parseFloat(document.getElementById('edit-train-weight').value);
-            updatedData.reps = isMedicineBallType(updatedData.type) ? 1 : parseInt(document.getElementById('edit-train-reps').value);
-            updatedData.sets = isMedicineBallType(updatedData.type) ? 1 : parseInt(document.getElementById('edit-train-sets').value);
+            const isSingleValueMode = getRecordInputConfig('training', updatedData.type).mode !== 'weight';
+            updatedData.reps = isSingleValueMode ? 1 : parseInt(document.getElementById('edit-train-reps').value);
+            updatedData.sets = isSingleValueMode ? 1 : parseInt(document.getElementById('edit-train-sets').value);
         } else if (type === 'stats') {
             updatedData.date = document.getElementById('edit-stat-date').value;
             updatedData.type = document.getElementById('edit-stat-type').value;
@@ -3268,12 +3590,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (histType === 'training') {
             const unit = getTrainingValueUnit(record.type);
+            const isSingleValueMode = getRecordInputConfig('training', record.type).mode !== 'weight';
             return {
                 dataType: 'トレーニング',
                 item: record.type,
                 value1: `${record.weight}${unit}`,
-                value2: isMedicineBallType(record.type) ? '' : record.reps,
-                value3: isMedicineBallType(record.type) ? '' : record.sets,
+                value2: isSingleValueMode ? '' : record.reps,
+                value3: isSingleValueMode ? '' : record.sets,
                 memo: record.otherMemo || '',
                 label: formatTrainingRecordLabel(record)
             };
